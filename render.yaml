@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: smart-hotel-room-service
+    runtime: node
+    plan: free
+    buildCommand: ""
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 18.20.0

@@ -556,7 +556,7 @@ const server = http.createServer(async (req, res) => {
 
 server.on('listening', () => {
   console.log(`Cloud Hotel Room Service running at http://localhost:${PORT}`);
-  if (LEGACY_PORT !== PORT) {
+  if (LEGACY_PORT !== PORT && !process.env.RENDER) {
     const legacyServer = http.createServer(server.listeners('request')[0]);
     legacyServer.on('error', error => console.warn(`Cổng QR cũ ${LEGACY_PORT} không khả dụng: ${error.message}`));
     legacyServer.listen(LEGACY_PORT, '0.0.0.0', () => console.log(`QR compatibility endpoint running at http://localhost:${LEGACY_PORT}`));
