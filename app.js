@@ -26,22 +26,33 @@ let MENU_ITEMS = [
 
 let cart = {};
 let currentTable = null; // Số phòng (ví dụ: Phòng 101)
-const API_BASE = location.port === '3000' ? '' : `${location.protocol}//${location.hostname}:3000`;
+const API_BASE = (location.port === '5500') ? `${location.protocol}//${location.hostname}:3000` : '';
 const apiUrl = path => `${API_BASE}${path}`;
 const money = value => Number(value || 0) === 0 ? 'Miễn phí' : `${Number(value || 0).toLocaleString('vi-VN')}đ`;
 
 async function getOrders() {
-  try {
-    const response = await fetch(apiUrl(`/api/orders?table=${encodeURIComponent(currentTable)}`), { credentials: 'include' });
-    if (!response.ok) throw new Error('Không đọc được API server');
-    return (await response.json()).orders;
-  } catch (_) {
-    const local = JSON.parse(localStorage.getItem('cloud_hotel_orders') || '[]');
-    return local.filter(order => order.table === currentTable);
+  if (!currentTable) return [];
+  const response = await fetch(apiUrl(`/api/orders?table=${encodeURIComponent(currentTable)}`), { credentials: 'include' });
+  if (!response.ok) throw new Error('Không thể kết nối đến máy chủ khách sạn.');
+  const data = await response.json();
+  return Array.isArray(data.orders) ? data.orders : [];
+}
+
+function updateSectionCounts() {
+  const foodHeading = document.querySelector('#foodSection .section-count');
+  if (foodHeading) {
+    const hkCount = MENU_ITEMS.filter(item => item.section === 'housekeeping').length;
+    foodHeading.textContent = `${hkCount} dịch vụ`;
+  }
+  const drinkHeading = document.querySelector('#drinkSection .section-count');
+  if (drinkHeading) {
+    const diningCount = MENU_ITEMS.filter(item => item.section === 'dining').length;
+    drinkHeading.textContent = `${diningCount} món`;
   }
 }
 
 function renderMenu() {
+  updateSectionCounts();
   const query = (document.getElementById('menuSearch')?.value || '').trim().toLocaleLowerCase('vi');
   const serviceLabels = { all: 'Tất cả dịch vụ', cleaning: 'Dọn phòng & Vệ sinh', amenities: 'Mượn đồ dùng', laundry: 'Giặt ủi', rental: 'Thuê xe & Đưa đón' };
   const diningLabels = { all: 'Tất cả món', breakfast: 'Điểm tâm sáng', main: 'Món chính tại phòng', snack: 'Trái cây & Ăn vặt', beverage: 'Cà phê & Đồ uống', minibar: 'Đồ uống Minibar' };
@@ -49,19 +60,19 @@ function renderMenu() {
   const card = item => `
     <article class="food-card ${item.available === false ? 'sold-out' : ''}">
       <div class="food-img-wrap">
-        <span>${item.icon}</span>
+        <span>${item.icon || '🛎️'}</span>
         ${item.salePercent ? `<span class="sale-badge">-${item.salePercent}%</span>` : ''}
         ${item.price === 0 ? '<span class="sale-badge" style="background:#15803d">Free</span>' : ''}
         ${item.available === false ? '<span class="sold-out-badge">Tạm hết</span>' : ''}
       </div>
       <div class="food-info">
         <div>
-          <h4 class="food-name">${item.name}</h4>
-          <p class="food-desc">${item.desc}</p>
+          <h4 class="food-name">${escapeHtml(item.name)}</h4>
+          <p class="food-desc">${escapeHtml(item.desc || '')}</p>
         </div>
         <div class="food-bottom">
           <span class="food-price">${money(Math.round(item.price * (100 - (item.salePercent || 0)) / 100))}${item.salePercent ? `<del>${money(item.price)}</del>` : ''}</span>
-          <button class="btn-add" aria-label="Chọn ${item.name}" ${item.available === false ? 'disabled' : ''} onclick="addToCart(${item.id})">+</button>
+          <button class="btn-add" aria-label="Chọn ${escapeHtml(item.name)}" ${item.available === false ? 'disabled' : ''} onclick="addToCart(${item.id})">+</button>
         </div>
       </div>
     </article>`;
@@ -70,16 +81,15 @@ function renderMenu() {
     const active = document.querySelector(`[data-filter-group="${section}"] .cat-btn.active`)?.dataset.filter || 'all';
     const shown = MENU_ITEMS.filter(item => item.section === section && (active === 'all' || item.category === active) && (!query || `${item.name} ${item.desc}`.toLocaleLowerCase('vi').includes(query)));
     const gridElem = document.getElementById(gridId);
-    if (gridElem) gridElem.innerHTML = shown.map(card).join('');
+    if (gridElem) gridElem.innerHTML = shown.length ? shown.map(card).join('') : '<p style="grid-column:1/-1; padding:20px; text-align:center; color:#64748b;">Không tìm thấy dịch vụ phù hợp.</p>';
     
     const nav = document.querySelector(`[data-filter-group="${section}"]`);
-    if (nav) {
+    if (nav && !nav.children.length) {
       nav.innerHTML = Object.entries(filters).map(([key, title]) => `<button class="cat-btn ${key === active ? 'active' : ''}" data-filter="${key}">${title}</button>`).join('');
       nav.querySelectorAll('.cat-btn').forEach(button => button.addEventListener('click', () => {
         nav.querySelectorAll('.cat-btn').forEach(item => item.classList.remove('active'));
         button.classList.add('active');
-        const search = (document.getElementById('menuSearch')?.value || '').trim().toLocaleLowerCase('vi');
-        if (gridElem) gridElem.innerHTML = MENU_ITEMS.filter(item => item.section === section && (button.dataset.filter === 'all' || item.category === button.dataset.filter) && (!search || `${item.name} ${item.desc}`.toLocaleLowerCase('vi').includes(search))).map(card).join('');
+        renderMenu();
       }));
     }
   };
@@ -99,7 +109,7 @@ function renderCart() {
   list.innerHTML = entries.length ? entries.map(({ item, qty, note }) => `
     <div class="cart-item-row">
       <div class="cart-line-main">
-        <strong>${item.name}</strong>
+        <strong>${escapeHtml(item.name)}</strong>
         <span>${money(Math.round(item.price * (100 - (item.salePercent || 0)) / 100) * qty)}</span>
         <label class="note-label">Yêu cầu thêm / Giờ phục vụ
           <input class="item-note-input" maxlength="100" value="${escapeHtml(note)}" placeholder="VD: làm ngay lúc 10h, ít cay..." oninput="setItemNote(${item.id}, this.value)">
@@ -118,25 +128,45 @@ function escapeHtml(value = '') {
 }
 
 window.addToCart = id => {
-  if (!currentTable) { showTableGuide(); return; }
+  if (!currentTable) { promptSelectRoom(); return; }
   const item = MENU_ITEMS.find(menuItem => menuItem.id === id);
+  if (!item) return;
   if (!cart[id]) cart[id] = { item, qty: 0, note: '' };
   cart[id].qty += 1;
   renderCart();
 };
+
+function promptSelectRoom() {
+  const chosen = window.prompt("Vui lòng nhập số phòng của quý khách (Ví dụ: 101 đến 112):", "101");
+  if (!chosen) return;
+  const digits = chosen.replace(/\D/g, '');
+  if (!digits) {
+    alert("Số phòng không hợp lệ.");
+    return;
+  }
+  const roomNum = Number(digits);
+  currentTable = `Phòng ${roomNum}`;
+  const url = new URL(location.href);
+  url.searchParams.set('room', roomNum);
+  history.replaceState(null, '', url.toString());
+  updateRoomUI();
+}
+
 function showTableGuide() {
   const guide = document.getElementById('tableEntryGuide');
-  if (!guide) return;
+  if (!guide) { promptSelectRoom(); return; }
   guide.classList.add('guide-attention');
   guide.scrollIntoView({ behavior: 'smooth', block: 'center' });
   window.setTimeout(() => guide.classList.remove('guide-attention'), 1800);
 }
+
 window.changeQty = (id, delta) => {
   if (!cart[id]) return;
   cart[id].qty += delta;
   if (cart[id].qty <= 0) delete cart[id];
   renderCart();
 };
+
 window.setItemNote = (id, note) => { if (cart[id]) cart[id].note = note; };
 
 async function renderCustomerStatus() {
@@ -144,12 +174,23 @@ async function renderCustomerStatus() {
   if (!area) return;
   if (!currentTable) { area.innerHTML = ''; return; }
   let active = [];
-  try { active = (await getOrders()).slice(0, 5); }
-  catch (error) { area.innerHTML = `<p class="connection-error">${error.message} Vui lòng tải lại trang.</p>`; return; }
-  area.innerHTML = active.length ? `<h2>Yêu cầu của ${currentTable}</h2>${active.map(order => {
-    const label = { pending: 'Lễ tân đã tiếp nhận', cooking: 'Nhân viên đang thực hiện', ready: 'Đã hoàn tất phục vụ', served: 'Đã phục vụ', paid: 'Đã thanh toán lúc check-out' }[order.status] || 'Đang xử lý';
+  try {
+    active = (await getOrders()).slice(0, 5);
+  } catch (error) {
+    area.innerHTML = `<p class="connection-error">${escapeHtml(error.message)}</p>`;
+    return;
+  }
+  area.innerHTML = active.length ? `<h2>Yêu cầu gần đây của ${escapeHtml(currentTable)}</h2>${active.map(order => {
+    const label = {
+      pending: 'Lễ tân đã tiếp nhận',
+      cooking: 'Nhân viên đang thực hiện',
+      ready: 'Đã hoàn tất phục vụ',
+      served: 'Đã phục vụ',
+      paid: 'Đã thanh toán lúc check-out',
+      cancelled: 'Đã hủy'
+    }[order.status] || 'Đang xử lý';
     return `
-      <article class="customer-order-card">
+      <article class="customer-order-card ${order.status === 'cancelled' ? 'cancelled' : ''}">
         <div>
           <strong>#${escapeHtml(order.id)}</strong>
           <span>${label}</span>
@@ -164,61 +205,84 @@ async function renderCustomerStatus() {
 async function submitOrder() {
   const entries = Object.values(cart);
   if (!entries.length) return alert('Danh sách yêu cầu đang trống.');
-  const submitButton = document.getElementById('btnSubmitOrder'); submitButton.disabled = true;
+  if (!currentTable) { promptSelectRoom(); return; }
+
+  const submitButton = document.getElementById('btnSubmitOrder');
+  submitButton.disabled = true;
+  submitButton.textContent = 'Đang gửi yêu cầu...';
+
   try {
     const response = await fetch(apiUrl('/api/orders'), {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ table: currentTable, items: entries.map(({ item, qty, note }) => ({ id: item.id, qty, note: note.trim() })) })
+      body: JSON.stringify({
+        table: currentTable,
+        items: entries.map(({ item, qty, note }) => ({ id: item.id, qty, note: (note || '').trim() }))
+      })
     });
+
+    const result = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const result = await response.json().catch(() => ({}));
-      throw new Error(result.error || 'Lỗi gửi API server');
+      throw new Error(result.error || `Lỗi máy chủ (${response.status})`);
     }
+
+    // Đặt thành công
+    cart = {};
+    renderCart();
+    document.getElementById('cartModal')?.classList.remove('active');
+    await renderCustomerStatus();
+    document.getElementById('successModal')?.classList.add('active');
   } catch (error) {
-    console.info('Gửi yêu cầu qua chế độ lưu cục bộ:', error.message);
-    const local = JSON.parse(localStorage.getItem('cloud_hotel_orders') || '[]');
-    const newOrder = {
-      id: `SRV-${Date.now().toString().slice(-6)}`,
-      table: currentTable,
-      items: entries.map(({ item, qty, note }) => ({
-        id: item.id,
-        name: item.name,
-        qty,
-        note: note.trim(),
-        total: Math.round(item.price * (100 - (item.salePercent || 0)) / 100) * qty
-      })),
-      totalPrice: entries.reduce((sum, e) => sum + Math.round(e.item.price * (100 - (e.item.salePercent || 0)) / 100) * e.qty, 0),
-      createdAt: new Date().toISOString(),
-      status: 'pending'
-    };
-    local.unshift(newOrder);
-    localStorage.setItem('cloud_hotel_orders', JSON.stringify(local));
+    alert(`Không thể gửi yêu cầu đến Bộ phận phục vụ:\n${error.message}\n\nQuý khách vui lòng thử lại hoặc bấm số máy nhánh 0 gọi Lễ tân.`);
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = '🛎️ Gửi yêu cầu tới Bộ phận phục vụ';
   }
-  submitButton.disabled = false;
-  cart = {};
-  renderCart();
-  document.getElementById('cartModal').classList.remove('active');
-  await renderCustomerStatus();
-  document.getElementById('successModal').classList.add('active');
 }
 
 window.printReceipt = async id => {
-  const order = (await getOrders()).find(row => row.id === id); if (!order) return;
-  const receipt = document.getElementById('receiptPrint');
-  receipt.innerHTML = `
-    <h2>Grand Cloud Hotel &amp; Resort</h2>
-    <p>${order.status === 'paid' ? 'HÓA ĐƠN DỊCH VỤ PHÒNG (CHECK-OUT)' : 'PHIẾU XÁC NHẬN DỊCH VỤ TẠI PHÒNG'} · ${escapeHtml(order.table)}</p>
-    <p>Mã yêu cầu: ${escapeHtml(order.id)} · ${new Date(order.createdAt).toLocaleString('vi-VN')}</p>
-    <hr>${order.items.map(item => `<p>${item.qty} × ${escapeHtml(item.name)} ${money(item.total)}</p>${item.salePercent ? `<small>Ưu đãi phòng: -${item.salePercent}%</small>` : ''}${item.note ? `<small>Ghi chú: ${escapeHtml(item.note)}</small>` : ''}`).join('')}
-    <hr>
-    <p>Tạm tính dịch vụ: <b>${money(order.totalPrice)}</b></p>
-    ${order.voucherDiscount ? `<p>Ưu đãi ${escapeHtml(order.voucherCode)}: -${money(order.voucherDiscount)}</p>` : ''}
-    <p>Tổng thanh toán: <b>${money(order.amountPaid ?? order.totalPrice)}</b></p>
-    <p>${order.status === 'paid' ? 'Đã thanh toán. Chúc quý khách kỳ nghỉ tuyệt vời!' : 'Khoản này sẽ được cộng vào hóa đơn phòng khi check-out.'}</p>`;
-  window.print();
+  try {
+    const orders = await getOrders();
+    const order = orders.find(row => row.id === id);
+    if (!order) return alert('Không tìm thấy thông tin phiếu dịch vụ.');
+    const receipt = document.getElementById('receiptPrint');
+    receipt.innerHTML = `
+      <h2>Grand Cloud Hotel &amp; Resort</h2>
+      <p>${order.status === 'paid' ? 'HÓA ĐƠN DỊCH VỤ PHÒNG (CHECK-OUT)' : 'PHIẾU XÁC NHẬN DỊCH VỤ TẠI PHÒNG'} · ${escapeHtml(order.table)}</p>
+      <p>Mã yêu cầu: ${escapeHtml(order.id)} · ${new Date(order.createdAt).toLocaleString('vi-VN')}</p>
+      <hr>${order.items.map(item => `<p>${item.qty} × ${escapeHtml(item.name)} ${money(item.total)}</p>${item.salePercent ? `<small>Ưu đãi phòng: -${item.salePercent}%</small>` : ''}${item.note ? `<small>Ghi chú: ${escapeHtml(item.note)}</small>` : ''}`).join('')}
+      <hr>
+      <p>Tạm tính dịch vụ: <b>${money(order.totalPrice)}</b></p>
+      ${order.voucherDiscount ? `<p>Ưu đãi ${escapeHtml(order.voucherCode)}: -${money(order.voucherDiscount)}</p>` : ''}
+      <p>Tổng thanh toán: <b>${money(order.amountPaid ?? order.totalPrice)}</b></p>
+      <p>${order.status === 'paid' ? 'Đã thanh toán. Chúc quý khách kỳ nghỉ tuyệt vời!' : 'Khoản này sẽ được cộng vào hóa đơn phòng khi check-out.'}</p>`;
+    window.print();
+  } catch (e) {
+    alert('Không thể tải phiếu in: ' + e.message);
+  }
 };
+
+function updateRoomUI() {
+  ['tableLabel', 'currentTableText', 'modalTableNumber', 'successTableText'].forEach(id => {
+    const element = document.getElementById(id);
+    if (element) element.textContent = currentTable || 'Chọn số phòng';
+  });
+
+  const welcomeText = document.querySelector('.welcome-banner p');
+  if (welcomeText) {
+    welcomeText.innerHTML = currentTable
+      ? `Chào mừng quý khách đang lưu trú tại <b>${escapeHtml(currentTable)}</b>. Vui lòng chọn dịch vụ buồng phòng hoặc ẩm thực bên dưới.`
+      : 'Quý khách vui lòng quét mã QR đặt tại bàn trong phòng (hoặc chạm vào đây để chọn phòng).';
+  }
+
+  const guide = document.getElementById('tableEntryGuide');
+  if (guide) guide.hidden = Boolean(currentTable);
+  const badge = document.getElementById('tableBadge');
+  if (badge) badge.classList.toggle('table-selected', Boolean(currentTable));
+
+  renderCustomerStatus();
+}
 
 async function init() {
   const params = new URLSearchParams(location.search);
@@ -226,25 +290,14 @@ async function init() {
   const digits = rawRoom ? rawRoom.replace(/\D/g, '') : '';
   const roomNum = Number(digits);
   currentTable = digits ? `Phòng ${roomNum}` : null;
-  
-  ['tableLabel', 'currentTableText', 'modalTableNumber', 'successTableText'].forEach(id => {
-    const element = document.getElementById(id);
-    if (element) element.textContent = currentTable || 'Quét mã QR tại phòng';
-  });
-  
-  const welcomeText = document.querySelector('.welcome-banner p');
-  if (welcomeText) {
-    welcomeText.innerHTML = currentTable
-      ? `Chào mừng quý khách đang lưu trú tại <b>${currentTable}</b>. Vui lòng chọn dịch vụ buồng phòng hoặc ẩm thực bên dưới.`
-      : 'Quý khách vui lòng quét mã QR đặt trên bàn làm việc trong phòng để gửi yêu cầu đúng số phòng.';
-  }
-  
-  const guide = document.getElementById('tableEntryGuide');
-  if (guide) guide.hidden = Boolean(currentTable);
-  const badge = document.getElementById('tableBadge');
-  if (badge) badge.classList.toggle('table-selected', Boolean(currentTable));
 
-  // Tải danh mục dịch vụ từ server hoặc dùng mẫu
+  updateRoomUI();
+
+  // Cho phép bấm vào badge hoặc guide để chọn phòng tiện lợi
+  document.getElementById('tableBadge')?.addEventListener('click', promptSelectRoom);
+  document.getElementById('tableEntryGuide')?.addEventListener('click', promptSelectRoom);
+
+  // Tải danh mục dịch vụ từ server
   try {
     const response = await fetch(apiUrl('/api/menu'));
     if (response.ok) {
@@ -254,24 +307,28 @@ async function init() {
       }
     }
   } catch (_) {
-    console.info('Chế độ xem trước: Sử dụng danh mục dịch vụ khách sạn có sẵn.');
+    console.info('Sử dụng danh mục dịch vụ phòng mặc định.');
   }
-  renderMenu();
 
+  renderMenu();
   document.getElementById('menuSearch')?.addEventListener('input', renderMenu);
   renderCart();
-  renderCustomerStatus();
-  
-  document.getElementById('btnOpenCart')?.addEventListener('click', () => { if (!currentTable) return showTableGuide(); renderCart(); document.getElementById('cartModal')?.classList.add('active'); });
+
+  document.getElementById('btnOpenCart')?.addEventListener('click', () => {
+    if (!currentTable) return promptSelectRoom();
+    renderCart();
+    document.getElementById('cartModal')?.classList.add('active');
+  });
   document.getElementById('btnCloseCart')?.addEventListener('click', () => document.getElementById('cartModal')?.classList.remove('active'));
   document.getElementById('btnSubmitOrder')?.addEventListener('click', submitOrder);
   document.getElementById('btnCloseSuccess')?.addEventListener('click', () => document.getElementById('successModal')?.classList.remove('active'));
-  
+
   if (currentTable) {
     try {
       const updates = new EventSource(apiUrl(`/api/events?table=${encodeURIComponent(currentTable)}`), { withCredentials: true });
-      updates.addEventListener('order', renderCustomerStatus);
+      updates.addEventListener('order', () => renderCustomerStatus());
     } catch (_) {}
   }
 }
+
 document.addEventListener('DOMContentLoaded', init);

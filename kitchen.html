@@ -5,6 +5,33 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Điều phối Buồng phòng &amp; Dịch vụ · Grand Cloud Hotel</title>
   <link rel="stylesheet" href="style.css">
+  <style>
+    .kds-filter-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+    }
+    .kds-filter-btn {
+      background: #f1f5f9;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #475569;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .kds-filter-btn:hover {
+      background: #e2e8f0;
+    }
+    .kds-filter-btn.active {
+      background: #0f172a;
+      color: white;
+      border-color: #0f172a;
+    }
+  </style>
 </head>
 <body class="kitchen-body professional-kitchen">
   <header class="kds-header">
@@ -57,6 +84,12 @@
         <small>Đã phục vụ xong cho khách</small>
       </article>
     </section>
+
+    <div class="kds-filter-bar">
+      <button class="kds-filter-btn active" data-kds-filter="active">Đang chờ &amp; Phục vụ</button>
+      <button class="kds-filter-btn" data-kds-filter="all">Tất cả yêu cầu</button>
+      <button class="kds-filter-btn" data-kds-filter="ready">Đã hoàn tất</button>
+    </div>
 
     <div class="station-grid">
       <section class="station-panel food-station">

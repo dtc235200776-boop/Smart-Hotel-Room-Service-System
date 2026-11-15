@@ -1,9 +1,26 @@
 const money = value => Number(value || 0) === 0 ? 'Miễn phí' : `${Number(value || 0).toLocaleString('vi-VN')}đ`;
-const API_BASE = location.port === '3000' ? '' : `${location.protocol}//${location.hostname}:3000`;
+const API_BASE = (location.port === '5500') ? `${location.protocol}//${location.hostname}:3000` : '';
 const apiUrl = path => `${API_BASE}${path}`;
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 let orders = [];
 let previousOrderIds = new Set();
+let currentFilter = 'active'; // 'active' (pending + cooking), 'all', 'ready'
+let audioCtx = null;
+
+function getAudioContext() {
+  if (!audioCtx) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (AudioContextClass) audioCtx = new AudioContextClass();
+  }
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(() => {});
+  }
+  return audioCtx;
+}
+
+// Mở khóa âm thanh khi người dùng tương tác lần đầu
+window.addEventListener('click', () => getAudioContext(), { once: true });
+window.addEventListener('keydown', () => getAudioContext(), { once: true });
 
 function updateKitchenClock() {
   const clock = document.getElementById('kdsClock');
@@ -20,12 +37,35 @@ async function api(url, options = {}) {
   return result;
 }
 
-function playAlert() { try { const ctx = new AudioContext(); const tone = ctx.createOscillator(); const gain = ctx.createGain(); tone.frequency.value = 880; gain.gain.value = .12; tone.connect(gain); gain.connect(ctx.destination); tone.start(); tone.stop(ctx.currentTime + .2); } catch (_) {} }
+function playAlert() {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    const tone = ctx.createOscillator();
+    const gain = ctx.createGain();
+    tone.type = 'sine';
+    tone.frequency.setValueAtTime(880, ctx.currentTime);
+    tone.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.2);
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+    tone.connect(gain);
+    gain.connect(ctx.destination);
+    tone.start(ctx.currentTime);
+    tone.stop(ctx.currentTime + 0.3);
+  } catch (_) {}
+}
 
 function renderStation(station, rootId, countId) {
-  const active = orders.filter(order => order.status !== 'paid' && order.stations?.[station]);
-  document.getElementById(countId).textContent = `${active.length} yêu cầu`;
-  document.getElementById(rootId).innerHTML = active.length ? active.map(order => {
+  let stationOrders = orders.filter(order => order.status !== 'paid' && order.status !== 'cancelled' && order.stations?.[station]);
+  
+  if (currentFilter === 'active') {
+    stationOrders = stationOrders.filter(order => order.stations[station] === 'pending' || order.stations[station] === 'cooking');
+  } else if (currentFilter === 'ready') {
+    stationOrders = stationOrders.filter(order => order.stations[station] === 'ready');
+  }
+
+  document.getElementById(countId).textContent = `${stationOrders.length} yêu cầu`;
+  document.getElementById(rootId).innerHTML = stationOrders.length ? stationOrders.map(order => {
     const status = order.stations[station];
     const items = order.items.filter(item => item.section === station);
     const minutes = Math.max(0, Math.floor((Date.now() - Date.parse(order.createdAt)) / 60000));
@@ -52,46 +92,87 @@ function renderStation(station, rootId, countId) {
         </ul>
         <footer>${action}</footer>
       </article>`;
-  }).join('') : '<div class="station-empty"><span>✓</span><b>Chưa có yêu cầu mới</b><small>Yêu cầu dịch vụ từ khách sẽ tự động xuất hiện tại đây</small></div>';
+  }).join('') : '<div class="station-empty"><span>✓</span><b>Không có yêu cầu nào</b><small>Yêu cầu dịch vụ từ khách sẽ tự động xuất hiện tại đây</small></div>';
 }
 
 function renderKitchen() {
-  const pending = orders.filter(order => order.status !== 'paid').reduce((sum, order) => sum + Object.values(order.stations || {}).filter(status => status === 'pending').length, 0);
-  const cooking = orders.filter(order => order.status !== 'paid').reduce((sum, order) => sum + Object.values(order.stations || {}).filter(status => status === 'cooking').length, 0);
-  const ready = orders.filter(order => order.status === 'ready' || order.status === 'served').length;
+  const activeOrders = orders.filter(order => order.status !== 'paid' && order.status !== 'cancelled');
+  const pending = activeOrders.reduce((sum, order) => sum + Object.values(order.stations || {}).filter(status => status === 'pending').length, 0);
+  const cooking = activeOrders.reduce((sum, order) => sum + Object.values(order.stations || {}).filter(status => status === 'cooking').length, 0);
+  const ready = activeOrders.filter(order => order.status === 'ready' || order.status === 'served').length;
+  
   document.getElementById('pendingTotal').textContent = pending;
   document.getElementById('cookingTotal').textContent = cooking;
   document.getElementById('readyTotal').textContent = ready;
+  
   renderStation('housekeeping', 'foodTickets', 'foodTicketCount');
   renderStation('dining', 'drinkTickets', 'drinkTicketCount');
 }
 
-async function loadOrders() { orders = (await api('/api/orders')).orders; renderKitchen(); }
+async function loadOrders() {
+  orders = (await api('/api/orders')).orders;
+  renderKitchen();
+}
+
 document.addEventListener('click', async event => {
-  const button = event.target.closest('[data-order][data-station]'); if (!button) return;
+  const button = event.target.closest('[data-order][data-station]');
+  if (!button) return;
   button.disabled = true;
   try {
-    await api(`/api/orders/${encodeURIComponent(button.dataset.order)}/station`, { method: 'PATCH', body: JSON.stringify({ station: button.dataset.station, status: button.dataset.status }) });
+    await api(`/api/orders/${encodeURIComponent(button.dataset.order)}/station`, {
+      method: 'PATCH',
+      body: JSON.stringify({ station: button.dataset.station, status: button.dataset.status })
+    });
     await loadOrders();
-  } catch (error) { alert(error.message); button.disabled = false; }
+  } catch (error) {
+    alert(error.message);
+    button.disabled = false;
+  }
 });
-document.getElementById('logoutButton').addEventListener('click', async () => { await api('/api/logout', { method: 'POST' }); location.replace('/index.html'); });
+
+document.querySelectorAll('[data-kds-filter]').forEach(button => {
+  button.addEventListener('click', () => {
+    document.querySelectorAll('[data-kds-filter]').forEach(btn => btn.classList.remove('active'));
+    button.classList.add('active');
+    currentFilter = button.dataset.kdsFilter;
+    renderKitchen();
+  });
+});
+
+document.getElementById('logoutButton')?.addEventListener('click', async () => {
+  await api('/api/logout', { method: 'POST' });
+  location.replace('/index.html');
+});
 
 (async () => {
   try {
     await loadOrders();
     previousOrderIds = new Set(orders.map(order => order.id));
-    document.getElementById('connectionState').textContent = '● Đang đồng bộ trực tiếp';
-    document.getElementById('connectionState').classList.add('connected');
+    const conn = document.getElementById('connectionState');
+    if (conn) {
+      conn.textContent = '● Đang đồng bộ trực tiếp';
+      conn.classList.add('connected');
+    }
     const events = new EventSource(apiUrl('/api/events'), { withCredentials: true });
     events.addEventListener('order', event => {
-      const order = JSON.parse(event.data); const isNew = !previousOrderIds.has(order.id);
+      const order = JSON.parse(event.data);
+      const isNew = !previousOrderIds.has(order.id);
       if (isNew) playAlert();
       previousOrderIds.add(order.id);
       const index = orders.findIndex(item => item.id === order.id);
-      if (index < 0) orders.unshift(order); else orders[index] = order;
+      if (index < 0) orders.unshift(order);
+      else orders[index] = order;
       renderKitchen();
     });
-    events.onerror = () => { document.getElementById('connectionState').textContent = 'Đang khôi phục kết nối…'; document.getElementById('connectionState').classList.remove('connected'); };
-  } catch (error) { document.getElementById('connectionState').textContent = error.message; }
+    events.onerror = () => {
+      const conn = document.getElementById('connectionState');
+      if (conn) {
+        conn.textContent = 'Đang khôi phục kết nối…';
+        conn.classList.remove('connected');
+      }
+    };
+  } catch (error) {
+    const conn = document.getElementById('connectionState');
+    if (conn) conn.textContent = error.message;
+  }
 })();

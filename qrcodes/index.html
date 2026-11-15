@@ -404,6 +404,22 @@
         if (res.ok) {
           const network = await res.json();
           if (network.url) initialUrl = network.url;
+          if (network.address) {
+            const btnLan = document.getElementById('btnLanIp');
+            if (btnLan) {
+              btnLan.textContent = `📌 ${network.address} (Wi-Fi máy này)`;
+              btnLan.setAttribute('onclick', `selectIp('${network.address}')`);
+            }
+          }
+          if (Array.isArray(network.addresses) && network.addresses.length > 1) {
+            const detectedElem = document.getElementById('detectedIps');
+            if (detectedElem) {
+              detectedElem.innerHTML = network.addresses
+                .filter(ip => ip !== network.address)
+                .map(ip => `<button class="quick-ip-chip" onclick="selectIp('${ip}')">${ip}</button>`)
+                .join('');
+            }
+          }
         }
       } catch (_) {}
 

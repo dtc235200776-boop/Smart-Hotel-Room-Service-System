@@ -5,6 +5,58 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Lễ tân &amp; Quyết toán phòng · Grand Cloud Hotel</title>
   <link rel="stylesheet" href="style.css">
+  <style>
+    .table-tile {
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .table-tile:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+    .table-tile.filter-selected {
+      border: 2px solid #2563eb !important;
+      background: #eff6ff !important;
+    }
+    .room-filter-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #dbeafe;
+      color: #1e40af;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 700;
+      margin-left: 12px;
+    }
+    .room-filter-clear {
+      background: none;
+      border: none;
+      color: #dc2626;
+      font-weight: bold;
+      cursor: pointer;
+      padding: 0 4px;
+    }
+    .cancel-button {
+      background: #fff;
+      color: #dc2626;
+      border: 1px solid #fca5a5;
+      border-radius: 7px;
+      padding: 7px 11px;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .cancel-button:hover {
+      background: #fef2f2;
+    }
+    .bill-card.cancelled {
+      opacity: 0.6;
+      border-left: 4px solid #94a3b8;
+    }
+  </style>
 </head>
 <body class="admin-body professional-admin">
   <header class="admin-header">
@@ -45,8 +97,13 @@
     <section class="admin-section">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">SƠ ĐỒ LƯU TRÚ</p>
-          <h2>Tình trạng các phòng (Phòng 101 - 112)</h2>
+          <p class="eyebrow">SƠ ĐỒ LƯU TRÚ (CHẠM VÀO PHÒNG ĐỂ LỌC HÓA ĐƠN)</p>
+          <h2>Tình trạng các phòng (Phòng 101 - 112)
+            <span id="selectedRoomBadge" style="display:none;" class="room-filter-indicator">
+              Đang lọc: <b id="selectedRoomText">Phòng 101</b>
+              <button class="room-filter-clear" id="btnClearRoomFilter" title="Xem tất cả các phòng">&times;</button>
+            </span>
+          </h2>
         </div>
         <div class="legend">
           <i class="free-dot"></i> Phòng trống 
@@ -98,6 +155,7 @@
   </main>
 
   <section id="receiptPrint" class="receipt-print"></section>
+
   <script src="admin.js"></script>
 </body>
 </html>
