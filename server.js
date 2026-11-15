@@ -5,12 +5,57 @@ const crypto = require('node:crypto');
 const os = require('node:os');
 
 const ROOT = __dirname;
+const BUILD_VERSION = '2026-11-03-guest-room-qr-realtime-1';
 const DATA_FILE = path.join(ROOT, 'data.json');
-const PORT = Number(process.env.PORT || 3000);
-const STAFF_PIN = process.env.STAFF_PIN || '246810'; // Demo PIN for Hotel Staff
+let PORT = Number(process.env.PORT || 3000);
+const STAFF_ACCOUNTS = {
+  receptionist: { username: 'letan', password: '123456', role: 'receptionist' },
+  cashier: { username: 'thungan', password: '123456', role: 'cashier' },
+  housekeeping: { username: 'buongphong', password: '123456', role: 'housekeeping' },
+  kitchen: { username: 'bep', password: '123456', role: 'kitchen' },
+  manager: { username: 'quanly', password: '123456', role: 'manager' }
+};
+const LEGACY_PORT = Number(process.env.LEGACY_PORT || 5500);
+const seedInventory = [
+  { id: 'towels', name: 'Khăn tắm', category: 'Buồng phòng', quantity: 38, minimum: 12, unit: 'chiếc' },
+  { id: 'linen', name: 'Bộ ga gối', category: 'Buồng phòng', quantity: 18, minimum: 6, unit: 'bộ' },
+  { id: 'amenities', name: 'Bộ đồ dùng cá nhân', category: 'Buồng phòng', quantity: 26, minimum: 10, unit: 'bộ' },
+  { id: 'detergent', name: 'Nước giặt', category: 'Buồng phòng', quantity: 9, minimum: 4, unit: 'can' },
+  { id: 'pho', name: 'Bánh phở & nước dùng', category: 'Bếp', quantity: 16, minimum: 6, unit: 'phần' },
+  { id: 'beef', name: 'Thịt bò', category: 'Bếp', quantity: 7, minimum: 5, unit: 'kg' },
+  { id: 'coffee', name: 'Cà phê & trà', category: 'Bếp', quantity: 14, minimum: 5, unit: 'hộp' },
+  { id: 'water', name: 'Nước khoáng', category: 'Minibar', quantity: 32, minimum: 12, unit: 'chai' },
+  { id: 'soft-drink', name: 'Nước ngọt', category: 'Minibar', quantity: 10, minimum: 12, unit: 'lon' },
+  { id: 'beer', name: 'Bia', category: 'Minibar', quantity: 22, minimum: 8, unit: 'lon' }
+];
 const SESSION_COOKIE = 'hotel_pos_staff';
 const sessions = new Map();
 const streams = new Set();
+
+// Cấu hình loại phòng & giá lưu trú theo đêm
+const ROOM_CONFIGS = {
+  standard: { type: 'standard', typeLabel: 'Phòng tiêu chuẩn', pricePerNight: 450000 },
+  deluxe: { type: 'deluxe', typeLabel: 'Phòng Deluxe', pricePerNight: 750000 },
+  suite: { type: 'suite', typeLabel: 'Phòng Suite', pricePerNight: 1200000 }
+};
+
+function getRoomDefaults(roomNumber) {
+  if (roomNumber <= 104) return ROOM_CONFIGS.standard;
+  if (roomNumber <= 108) return ROOM_CONFIGS.deluxe;
+  return ROOM_CONFIGS.suite;
+}
+
+// Công thức định mức trừ tồn kho tự động theo từng món dịch vụ
+const INVENTORY_RECIPES = {
+  1: [{ id: 'detergent', qty: 1 }, { id: 'linen', qty: 1 }],       // Dọn phòng & Đổi ga gối
+  2: [{ id: 'towels', qty: 2 }, { id: 'amenities', qty: 1 }],        // Bổ sung khăn tắm & Bộ vệ sinh
+  10: [{ id: 'pho', qty: 1 }, { id: 'beef', qty: 1 }],              // Phở bò
+  15: [{ id: 'coffee', qty: 1 }],                                   // Cà phê
+  18: [{ id: 'soft-drink', qty: 1 }],                               // Nước ngọt lon minibar
+  19: [{ id: 'beer', qty: 1 }],                                     // Bia lon minibar
+  20: [{ id: 'water', qty: 1 }],                                    // Nước khoáng minibar
+  21: [{ id: 'water', qty: 2 }]                                     // Bổ sung nước uống
+};
 
 const seedServices = [
   // 1. Dịch vụ buồng phòng & Tiện ích (Housekeeping & Amenities)
@@ -22,6 +67,8 @@ const seedServices = [
   { id: 6, section: 'housekeeping', category: 'laundry', name: 'Giặt hấp ủi cao cấp (Vest / Đầm)', price: 85000, desc: 'Giặt hấp chuyên dụng giữ phom dáng đồ cao cấp', icon: '👗', salePercent: 0 },
   { id: 7, section: 'housekeeping', category: 'rental', name: 'Thuê xe máy tay ga (Theo ngày)', price: 150000, desc: 'Xe tay ga đời mới, kèm 2 mũ bảo hiểm và giao xe tại sảnh', icon: '🛵', salePercent: 0 },
   { id: 8, section: 'housekeeping', category: 'rental', name: 'Xe đưa đón sân bay 4-7 chỗ', price: 320000, desc: 'Xe riêng đưa đón tận sảnh khách sạn đúng giờ hẹn', icon: '🚗', salePercent: 0 },
+  { id: 21, section: 'housekeeping', category: 'amenities', name: 'Bổ sung nước uống trong phòng', price: 0, desc: 'Nhân viên buồng phòng giao thêm nước uống đóng chai đến phòng', icon: '💧', salePercent: 0 },
+  { id: 22, section: 'housekeeping', category: 'amenities', name: 'Yêu cầu hỗ trợ tại phòng', price: 0, desc: 'Gọi nhân viên hỗ trợ và phối hợp lễ tân khi cần thiết', icon: '🛎️', salePercent: 0 },
 
   // 2. Ẩm thực & Minibar tại phòng (In-Room Dining)
   { id: 9, section: 'dining', category: 'breakfast', name: 'Set Ăn sáng kiểu Âu (Continental)', price: 65000, desc: 'Bánh sừng bò, trứng ốp la, xúc xích Đức, bơ mứt và nước cam', icon: '🍳', salePercent: 10 },
@@ -38,80 +85,70 @@ const seedServices = [
   { id: 20, section: 'dining', category: 'minibar', name: 'Nước khoáng thiên nhiên cao cấp', price: 15000, desc: 'Chai nước khoáng tinh khiết đóng chai 500ml', icon: '💧', salePercent: 0 }
 ];
 
-// Khởi tạo an toàn: Giữ lại orders cũ khi khởi động lại server
-function initStore() {
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      const parsed = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-      if (parsed && Array.isArray(parsed.orders)) {
-        if (!Array.isArray(parsed.menu) || parsed.menu.length === 0) {
-          parsed.menu = seedServices;
-        }
-        return parsed;
+// Khởi tạo hoặc cập nhật data.json sang dữ liệu khách sạn
+if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, JSON.stringify({ menu: seedServices, orders: [] }, null, 2));
+
+const readStore = () => {
+  const store = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+  if (!Array.isArray(store.menu)) store.menu = seedServices.map(item => ({ ...item }));
+  else {
+    let menuChanged = false;
+    for (const item of seedServices) if (!store.menu.some(existing => existing.id === item.id)) { store.menu.push({ ...item }); menuChanged = true; }
+    if (menuChanged) writeStore(store);
+  }
+  if (!Array.isArray(store.orders)) store.orders = [];
+  if (!Array.isArray(store.reservations)) store.reservations = [];
+  if (!Array.isArray(store.rooms)) {
+    store.rooms = Array.from({ length: 12 }, (_, index) => {
+      const num = 101 + index;
+      const def = getRoomDefaults(num);
+      return {
+        number: num,
+        type: def.type,
+        typeLabel: def.typeLabel,
+        pricePerNight: def.pricePerNight,
+        status: 'available',
+        guestName: '',
+        guestPhone: '',
+        checkIn: '',
+        plannedCheckout: '',
+        stayToken: '',
+        pin: ''
+      };
+    });
+  } else {
+    for (const room of store.rooms) {
+      const def = getRoomDefaults(room.number);
+      if (!room.type) room.type = def.type;
+      if (!room.typeLabel) room.typeLabel = def.typeLabel;
+      if (!room.pricePerNight) room.pricePerNight = def.pricePerNight;
+      if (room.status === 'occupied') {
+        if (!room.stayToken) room.stayToken = crypto.randomBytes(4).toString('hex').toUpperCase();
+        if (!room.pin) room.pin = String(1000 + (room.number % 9000));
+      } else {
+        if (room.stayToken) room.stayToken = '';
+        if (room.pin) room.pin = '';
       }
     }
-  } catch (err) {
-    console.warn('Cảnh báo đọc data.json, sẽ khởi tạo mới:', err.message);
   }
-  const initial = { menu: seedServices, orders: [] };
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(initial, null, 2), 'utf8');
-  } catch (err) {
-    console.error('Không thể tạo file data.json:', err.message);
-  }
-  return initial;
-}
+  if (!Array.isArray(store.inventory)) store.inventory = seedInventory.map(item => ({ ...item }));
+  return store;
+};
 
-let store = initStore();
-
-const readStore = () => store;
-const writeStore = updatedStore => {
-  store = updatedStore;
+const writeStore = store => {
   try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2), 'utf8');
+    fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2));
   } catch (err) {
     console.error('Lỗi lưu trữ data.json:', err.message);
   }
 };
 
-const sendJson = (res, status, value) => {
-  res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store'
-  });
-  res.end(JSON.stringify(value));
-};
-
-const getCookie = (req, name) =>
-  (req.headers.cookie || '')
-    .split(';')
-    .map(s => s.trim())
-    .find(s => s.startsWith(`${name}=`))
-    ?.slice(name.length + 1);
-
-const isStaff = req => {
-  const token = getCookie(req, SESSION_COOKIE);
-  const expires = sessions.get(token);
-  if (expires && expires > Date.now()) return true;
-  if (token) sessions.delete(token);
-  return false;
-};
-
-const readBody = req => new Promise((resolve, reject) => {
-  let data = '';
-  req.on('data', chunk => {
-    data += chunk;
-    if (data.length > 1_000_000) reject(new Error('Dữ liệu gửi lên quá lớn'));
-  });
-  req.on('end', () => {
-    try {
-      resolve(JSON.parse(data || '{}'));
-    } catch {
-      reject(new Error('JSON không hợp lệ'));
-    }
-  });
-  req.on('error', reject);
-});
+const sendJson = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
+const getCookie = (req, name) => (req.headers.cookie || '').split(';').map(s => s.trim()).find(s => s.startsWith(`${name}=`))?.slice(name.length + 1);
+const getRole = req => { const token = getCookie(req, SESSION_COOKIE); const session = sessions.get(token); if (session && session.expires > Date.now()) return session.role; if (token) sessions.delete(token); return null; };
+const isStaff = req => Boolean(getRole(req));
+const canAccess = (role, allowed) => role === 'manager' || allowed.includes(role);
+const readBody = req => new Promise((resolve, reject) => { let data = ''; req.on('data', chunk => { data += chunk; if (data.length > 1_000_000) reject(new Error('Dữ liệu gửi lên quá lớn')); }); req.on('end', () => { try { resolve(JSON.parse(data || '{}')); } catch { reject(new Error('JSON không hợp lệ')); } }); req.on('error', reject); });
 
 function broadcast(order) {
   for (const client of streams) {
@@ -125,12 +162,13 @@ function broadcast(order) {
   }
 }
 
-function updateOrder(currentStore, order) {
-  const index = currentStore.orders.findIndex(row => row.id === order.id);
-  if (index >= 0) currentStore.orders[index] = order;
-  writeStore(currentStore);
-  broadcast(order);
+function updateOrder(store, order) { const index = store.orders.findIndex(row => row.id === order.id); if (index >= 0) store.orders[index] = order; writeStore(store); broadcast(order); }
+function availableRooms(store, checkIn, checkOut) {
+  const active = store.reservations.filter(row => ['pending', 'confirmed'].includes(String(row.status).toLowerCase()) && row.checkIn < checkOut && row.checkOut > checkIn);
+  const heldRooms = store.rooms.filter(room => room.status === 'cleaning' || room.status === 'maintenance' || (room.status === 'occupied' && room.checkIn < checkOut && room.plannedCheckout > checkIn)).length;
+  return Math.max(0, store.rooms.length - heldRooms - active.length);
 }
+const validDate = value => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
@@ -143,69 +181,42 @@ const server = http.createServer(async (req, res) => {
     res.setHeader('Vary', 'Origin');
   }
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
-
   try {
-    if (req.method === 'GET' && url.pathname === '/api/health') {
-      return sendJson(res, 200, { ok: true, app: 'Grand Cloud Hotel & Resort Room Service', port: PORT, time: new Date().toISOString() });
-    }
-
+    if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, { ok: true, app: 'Cloud Hotel & Resort Room Service', version: BUILD_VERSION, port: PORT, time: new Date().toISOString() });
     if (req.method === 'GET' && url.pathname === '/api/network') {
       const allAddresses = Object.values(os.networkInterfaces()).flat().filter(item => item && item.family === 'IPv4' && !item.internal).map(item => item.address);
       const lanAddresses = allAddresses.filter(ip => !ip.startsWith('169.254.'));
-      const host = req.headers.host?.split(':')[0];
+      const hostHeader = req.headers.host || 'localhost';
+      const parsedHost = new URL(`http://${hostHeader}`);
+      const host = parsedHost.hostname;
       const address = host && !['localhost', '127.0.0.1', '0.0.0.0'].includes(host) ? host : (lanAddresses[0] || 'localhost');
-      return sendJson(res, 200, { address, addresses: lanAddresses, port: PORT, url: `http://${address}:${PORT}/index.html` });
+      const protocol = String(req.headers['x-forwarded-proto'] || (req.socket.encrypted ? 'https' : 'http')).split(',')[0].trim();
+      const localHost = ['localhost', '127.0.0.1', '0.0.0.0'].includes(host);
+      const publicAddress = !localHost && parsedHost.port !== String(LEGACY_PORT) ? hostHeader : `${address}:${PORT}`;
+      return sendJson(res, 200, { address, addresses: lanAddresses, url: `${protocol}://${publicAddress}/khach-hang.html` });
     }
-
-    if (req.method === 'GET' && url.pathname === '/api/session') {
-      return sendJson(res, 200, { staff: isStaff(req) });
-    }
-
+    if (req.method === 'GET' && url.pathname === '/api/session') { const role = getRole(req); return sendJson(res, 200, { staff: Boolean(role), role }); }
     if (req.method === 'POST' && url.pathname === '/api/login') {
       const body = await readBody(req);
-      if (String(body.pin || '') !== STAFF_PIN) return sendJson(res, 401, { error: 'Mã nhân viên khách sạn không đúng.' });
-      const token = crypto.randomBytes(32).toString('hex');
-      sessions.set(token, Date.now() + 12 * 60 * 60 * 1000);
-      res.writeHead(200, {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Set-Cookie': `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`,
-        'Cache-Control': 'no-store'
-      });
-      return res.end(JSON.stringify({ ok: true }));
+      const account = STAFF_ACCOUNTS[String(body.role || '')];
+      if (!account || String(body.username || '').trim() !== account.username || String(body.password || '').trim() !== account.password) return sendJson(res, 401, { error: 'Tài khoản, mật khẩu hoặc bộ phận không chính xác.' });
+      const token = crypto.randomBytes(32).toString('hex'); sessions.set(token, { expires: Date.now() + 12 * 60 * 60 * 1000, role: account.role });
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Set-Cookie': `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`, 'Cache-Control': 'no-store' }); return res.end(JSON.stringify({ ok: true, role: account.role }));
     }
-
-    if (req.method === 'POST' && url.pathname === '/api/logout') {
-      const token = getCookie(req, SESSION_COOKIE);
-      if (token) sessions.delete(token);
-      res.writeHead(204, { 'Set-Cookie': `${SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0` });
-      return res.end();
-    }
-
-    if (req.method === 'GET' && url.pathname === '/api/menu') {
-      return sendJson(res, 200, { items: readStore().menu });
-    }
-
+    if (req.method === 'POST' && url.pathname === '/api/logout') { const token = getCookie(req, SESSION_COOKIE); sessions.delete(token); res.writeHead(204, { 'Set-Cookie': `${SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0` }); return res.end(); }
+    if (req.method === 'GET' && url.pathname === '/api/menu') return sendJson(res, 200, { items: readStore().menu });
     if (req.method === 'GET' && url.pathname === '/api/orders') {
-      const currentStore = readStore();
-      if (isStaff(req)) return sendJson(res, 200, { orders: currentStore.orders });
+      const store = readStore();
+      if (isStaff(req)) return sendJson(res, 200, { orders: store.orders });
       const table = url.searchParams.get('table');
       if (!table) return sendJson(res, 401, { error: 'Chỉ nhân viên mới xem được toàn bộ yêu cầu.' });
-      return sendJson(res, 200, { orders: currentStore.orders.filter(order => order.table === table) });
+      return sendJson(res, 200, { orders: store.orders.filter(order => order.table === table) });
     }
-
     if (req.method === 'GET' && url.pathname === '/api/events') {
-      const staff = isStaff(req);
-      const table = url.searchParams.get('table');
+      const staff = isStaff(req); const table = url.searchParams.get('table');
       if (!staff && !table) return sendJson(res, 401, { error: 'Thiếu mã số phòng.' });
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive',
-        'X-Accel-Buffering': 'no'
-      });
-      res.write('retry: 3000\n\n');
-      const client = { res, staff, table };
-      streams.add(client);
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+      res.write('retry: 3000\n\n'); const client = { res, staff, table }; streams.add(client);
       const heartbeat = setInterval(() => {
         try {
           res.write(': keep-alive\n\n');
@@ -214,167 +225,355 @@ const server = http.createServer(async (req, res) => {
           streams.delete(client);
         }
       }, 20000);
-      req.on('close', () => {
-        clearInterval(heartbeat);
-        streams.delete(client);
-      });
-      return;
+      req.on('close', () => { clearInterval(heartbeat); streams.delete(client); }); return;
     }
+    if (req.method === 'GET' && url.pathname === '/api/room-auth') {
+      const roomNumber = Number(url.searchParams.get('room'));
+      const token = String(url.searchParams.get('token') || '').trim();
+      const pin = String(url.searchParams.get('pin') || '').trim();
+      const store = readStore();
+      const room = store.rooms.find(item => item.number === roomNumber);
+      if (!room) return sendJson(res, 404, { valid: false, error: 'Không tìm thấy phòng trong hệ thống.' });
+      if (room.status !== 'occupied') return sendJson(res, 409, { valid: false, error: 'Phòng hiện chưa nhận khách hoặc đang chờ buồng phòng dọn dẹp.' });
 
-    if (req.method === 'POST' && url.pathname === '/api/orders') {
-      const body = await readBody(req);
-      const table = String(body.table || '').trim();
-      if (!table || !Array.isArray(body.items) || !body.items.length) {
-        return sendJson(res, 400, { error: 'Số phòng hoặc danh sách dịch vụ không hợp lệ.' });
+      const tokenMatch = Boolean(token && room.stayToken && token.toUpperCase() === room.stayToken.toUpperCase());
+      const pinMatch = Boolean(pin && room.pin && pin === room.pin);
+      if (tokenMatch || pinMatch) {
+        return sendJson(res, 200, {
+          valid: true,
+          room: room.number,
+          guestName: room.guestName,
+          typeLabel: room.typeLabel || 'Phòng tiêu chuẩn',
+          token: room.stayToken
+        });
       }
-      const currentStore = readStore();
-      const items = [];
+      return sendJson(res, 403, { valid: false, error: 'Mã xác thực phòng (Token/PIN) không chính xác.' });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/orders') {
+      const body = await readBody(req); const table = String(body.table || '').trim();
+      if (!table || !Array.isArray(body.items) || !body.items.length) return sendJson(res, 400, { error: 'Số phòng hoặc danh sách dịch vụ không hợp lệ.' });
+      const store = readStore(); const items = [];
+      const roomNumber = Number(table.replace(/\D/g, '')); const room = store.rooms.find(item => item.number === roomNumber);
+      if (!room || room.status !== 'occupied') return sendJson(res, 409, { error: 'Phòng chưa được tiếp tân làm thủ tục nhận phòng hoặc đang chờ dọn dẹp.' });
+
+      // Bảo mật QR: Kiểm tra Token hoặc PIN phòng nếu là khách gửi đơn (nhân viên không cần check)
+      if (!isStaff(req)) {
+        const token = String(body.token || '').trim();
+        const pin = String(body.pin || '').trim();
+        const tokenMatch = Boolean(token && room.stayToken && token.toUpperCase() === room.stayToken.toUpperCase());
+        const pinMatch = Boolean(pin && room.pin && pin === room.pin);
+        if (!tokenMatch && !pinMatch) {
+          return sendJson(res, 403, { error: 'Xác thực phòng không hợp lệ hoặc phiên phòng đã hết hạn. Vui lòng quét lại mã QR tại phòng hoặc nhập đúng mã PIN.' });
+        }
+      }
+
       for (const row of body.items) {
-        const menuItem = currentStore.menu.find(item => item.id === Number(row.id) && item.available !== false);
+        const menuItem = store.menu.find(item => item.id === Number(row.id) && item.available !== false);
         const qty = Math.max(1, Math.min(50, Number(row.qty) || 1));
         if (!menuItem) return sendJson(res, 400, { error: 'Có dịch vụ tạm thời không khả dụng.' });
         const unitPrice = Math.round(menuItem.price * (100 - (menuItem.salePercent || 0)) / 100);
-        items.push({
-          id: menuItem.id,
-          name: menuItem.name,
-          section: menuItem.section,
-          category: menuItem.category,
-          qty,
-          note: String(row.note || '').slice(0, 120),
-          listPrice: menuItem.price,
-          salePercent: menuItem.salePercent || 0,
-          unitPrice,
-          total: unitPrice * qty
-        });
+        items.push({ id: menuItem.id, name: menuItem.name, section: menuItem.section, category: menuItem.category, qty, note: String(row.note || '').slice(0, 120), listPrice: menuItem.price, salePercent: menuItem.salePercent || 0, unitPrice, total: unitPrice * qty });
       }
-      const subtotal = items.reduce((sum, item) => sum + item.total, 0);
-      const promotionDiscount = items.reduce((sum, item) => sum + Math.round(item.listPrice * item.qty * item.salePercent / 100), 0);
-      const order = {
-        id: `SRV-${Date.now().toString().slice(-7)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`,
-        table,
-        items,
-        subtotal,
-        promotionDiscount,
-        voucherCode: '',
-        voucherDiscount: 0,
-        discountTotal: promotionDiscount,
-        totalPrice: subtotal,
-        createdAt: new Date().toISOString(),
-        status: 'pending',
-        stations: {
-          housekeeping: items.some(item => item.section === 'housekeeping') ? 'pending' : null,
-          dining: items.some(item => item.section === 'dining') ? 'pending' : null
+
+      // Tự động trừ tồn kho theo định mức của từng dịch vụ/món
+      if (Array.isArray(store.inventory)) {
+        for (const item of items) {
+          const recipe = INVENTORY_RECIPES[item.id];
+          if (recipe) {
+            for (const ing of recipe) {
+              const inv = store.inventory.find(i => i.id === ing.id);
+              if (inv) {
+                inv.quantity = Math.max(0, inv.quantity - (ing.qty * item.qty));
+                inv.updatedAt = new Date().toISOString();
+              }
+            }
+          }
         }
-      };
-      currentStore.orders.unshift(order);
-      writeStore(currentStore);
-      broadcast(order);
-      return sendJson(res, 201, { order });
-    }
-
-    const stationRoute = url.pathname.match(/^\/api\/orders\/([^/]+)\/station$/);
-    if (req.method === 'PATCH' && stationRoute) {
-      if (!isStaff(req)) return sendJson(res, 401, { error: 'Cần đăng nhập nhân viên khách sạn.' });
-      const body = await readBody(req);
-      const station = body.station;
-      const status = body.status;
-      if (!['housekeeping', 'dining'].includes(station) || !['pending', 'cooking', 'ready'].includes(status)) {
-        return sendJson(res, 400, { error: 'Trạng thái bộ phận không hợp lệ.' });
       }
-      const currentStore = readStore();
-      const order = currentStore.orders.find(row => row.id === decodeURIComponent(stationRoute[1]));
-      if (!order || !order.stations || !order.stations[station]) {
-        return sendJson(res, 404, { error: 'Không tìm thấy phiếu yêu cầu dịch vụ.' });
-      }
-      order.stations[station] = status;
-      const states = Object.values(order.stations).filter(Boolean);
-      order.status = states.every(state => state === 'ready') ? 'ready' : states.some(state => state === 'cooking' || state === 'ready') ? 'cooking' : 'pending';
-      order.updatedAt = new Date().toISOString();
-      updateOrder(currentStore, order);
-      return sendJson(res, 200, { order });
+
+      const subtotal = items.reduce((sum, item) => sum + item.total, 0); const promotionDiscount = items.reduce((sum, item) => sum + Math.round(item.listPrice * item.qty * item.salePercent / 100), 0);
+      const order = { id: `SRV-${Date.now().toString().slice(-7)}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`, table, items, subtotal, promotionDiscount, voucherCode: '', voucherDiscount: 0, discountTotal: promotionDiscount, totalPrice: subtotal, createdAt: new Date().toISOString(), status: 'pending', stations: { housekeeping: items.some(item => item.section === 'housekeeping') ? 'pending' : null, dining: items.some(item => item.section === 'dining') ? 'pending' : null } };
+      store.orders.unshift(order); writeStore(store); broadcast(order); return sendJson(res, 201, { order });
     }
 
-    const payRoute = url.pathname.match(/^\/api\/orders\/([^/]+)\/pay$/);
-    if (req.method === 'POST' && payRoute) {
-      if (!isStaff(req)) return sendJson(res, 401, { error: 'Cần đăng nhập nhân viên lễ tân.' });
-      const body = await readBody(req);
-      const currentStore = readStore();
-      const order = currentStore.orders.find(row => row.id === decodeURIComponent(payRoute[1]));
-      if (!order) return sendJson(res, 404, { error: 'Không tìm thấy hóa đơn phòng.' });
-      if (order.status === 'paid') return sendJson(res, 409, { error: 'Hóa đơn này đã thanh toán lúc check-out.' });
-      const code = String(body.voucherCode || '').trim().toUpperCase();
-      let voucherDiscount = 0;
-      if (code === 'HOTEL10') voucherDiscount = Math.min(Math.round(order.totalPrice * 0.1), 50000);
-      else if (code === 'VIPSTAY' && order.totalPrice >= 200000) voucherDiscount = 50000;
-      else if (code) return sendJson(res, 400, { error: 'Mã ưu đãi không hợp lệ.' });
-      order.voucherCode = code;
-      order.voucherDiscount = voucherDiscount;
-      order.discountTotal = order.promotionDiscount + voucherDiscount;
-      order.amountPaid = Math.max(0, order.totalPrice - voucherDiscount);
-      order.status = 'paid';
-      order.paidAt = new Date().toISOString();
-      updateOrder(currentStore, order);
-      return sendJson(res, 200, { order });
-    }
-
-    // Hỗ trợ hủy đơn do khách bấm nhầm hoặc đổi ý
+    // Hỗ trợ hủy đơn dịch vụ
     const cancelRoute = url.pathname.match(/^\/api\/orders\/([^/]+)\/cancel$/);
     if (req.method === 'POST' && cancelRoute) {
       if (!isStaff(req)) return sendJson(res, 401, { error: 'Cần đăng nhập nhân viên khách sạn.' });
-      const currentStore = readStore();
-      const order = currentStore.orders.find(row => row.id === decodeURIComponent(cancelRoute[1]));
+      const store = readStore();
+      const order = store.orders.find(row => row.id === decodeURIComponent(cancelRoute[1]));
       if (!order) return sendJson(res, 404, { error: 'Không tìm thấy phiếu yêu cầu dịch vụ.' });
       if (order.status === 'paid') return sendJson(res, 400, { error: 'Không thể hủy đơn đã quyết toán thanh toán.' });
       order.status = 'cancelled';
       order.cancelledAt = new Date().toISOString();
-      updateOrder(currentStore, order);
+      updateOrder(store, order);
       return sendJson(res, 200, { order });
     }
 
-    if (url.pathname.startsWith('/api/')) return sendJson(res, 404, { error: 'API không tồn tại.' });
+    if (req.method === 'GET' && url.pathname === '/api/rooms') {
+      if (!canAccess(getRole(req), ['receptionist', 'housekeeping'])) return sendJson(res, getRole(req) ? 403 : 401, { error: 'Chỉ nhân viên lễ tân, buồng phòng hoặc quản lý được xem tình trạng phòng.' });
+      return sendJson(res, 200, { rooms: readStore().rooms });
+    }
+    const roomBillRoute = url.pathname.match(/^\/api\/rooms\/(\d+)\/bill$/);
+    if (req.method === 'GET' && roomBillRoute) {
+      if (!canAccess(getRole(req), ['receptionist', 'cashier', 'manager'])) return sendJson(res, getRole(req) ? 403 : 401, { error: 'Chỉ nhân viên lễ tân, thu ngân hoặc quản lý được xem hóa đơn phòng.' });
+      const roomNumber = Number(roomBillRoute[1]);
+      const store = readStore();
+      const room = store.rooms.find(item => item.number === roomNumber);
+      if (!room) return sendJson(res, 404, { error: 'Không tìm thấy phòng.' });
 
-    let requested = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
+      const today = new Date().toISOString().slice(0, 10);
+      const checkInDate = room.checkIn || today;
+      const checkOutDate = room.plannedCheckout || today;
+      const d1 = new Date(`${checkInDate}T12:00:00`);
+      const d2 = new Date(`${checkOutDate}T12:00:00`);
+      const diffDays = Math.max(1, Math.round((d2 - d1) / (1000 * 60 * 60 * 24)));
+      const nights = isNaN(diffDays) || diffDays < 1 ? 1 : diffDays;
+      const def = getRoomDefaults(room.number);
+      const pricePerNight = room.pricePerNight || def.pricePerNight;
+      const roomTotal = nights * pricePerNight;
+
+      const roomOrders = store.orders.filter(order => order.table === `Phòng ${room.number}`);
+      const unpaidOrders = roomOrders.filter(order => order.status !== 'paid');
+      const paidOrders = roomOrders.filter(order => order.status === 'paid');
+
+      const servicesTotal = roomOrders.reduce((sum, order) => sum + (order.totalPrice || 0), 0);
+      const servicesUnpaid = unpaidOrders.reduce((sum, order) => sum + (order.totalPrice || 0), 0);
+      const servicesPaid = paidOrders.reduce((sum, order) => sum + (order.amountPaid ?? order.totalPrice), 0);
+
+      const grandTotal = roomTotal + servicesTotal;
+      const amountDue = roomTotal + servicesUnpaid;
+
+      return sendJson(res, 200, {
+        room: {
+          number: room.number,
+          guestName: room.guestName,
+          guestPhone: room.guestPhone,
+          type: room.type || def.type,
+          typeLabel: room.typeLabel || def.typeLabel,
+          checkIn: checkInDate,
+          plannedCheckout: checkOutDate,
+          nights,
+          pricePerNight,
+          roomTotal,
+          pin: room.pin,
+          stayToken: room.stayToken
+        },
+        orders: roomOrders,
+        unpaidOrders,
+        paidOrders,
+        servicesTotal,
+        servicesUnpaid,
+        servicesPaid,
+        grandTotal,
+        amountDue,
+        canCheckOut: unpaidOrders.every(o => ['ready', 'served'].includes(o.status))
+      });
+    }
+
+    const roomRoute = url.pathname.match(/^\/api\/rooms\/(\d+)$/);
+    if (req.method === 'PATCH' && roomRoute) {
+      const role = getRole(req); if (!role) return sendJson(res, 401, { error: 'Cần đăng nhập nhân viên khách sạn.' });
+      const body = await readBody(req); const store = readStore(); const room = store.rooms.find(item => item.number === Number(roomRoute[1]));
+      if (!room) return sendJson(res, 404, { error: 'Không tìm thấy phòng.' });
+      if (body.action === 'check_in') {
+        if (!canAccess(role, ['receptionist'])) return sendJson(res, 403, { error: 'Chỉ lễ tân hoặc quản lý được làm thủ tục nhận phòng.' });
+        const guestName = String(body.guestName || '').trim().slice(0, 80); const guestPhone = String(body.guestPhone || '').trim().slice(0, 30); const plannedCheckout = String(body.plannedCheckout || '');
+        if (room.status !== 'available') return sendJson(res, 409, { error: 'Phòng chưa sẵn sàng nhận khách.' });
+        if (!guestName || !guestPhone || !validDate(plannedCheckout) || plannedCheckout <= new Date().toISOString().slice(0, 10)) return sendJson(res, 400, { error: 'Cần nhập tên khách, số điện thoại và ngày trả phòng hợp lệ.' });
+        const today = new Date().toISOString().slice(0, 10);
+        const reservation = store.reservations.find(row => ['pending', 'confirmed'].includes(String(row.status).toLowerCase()) && row.phone === guestPhone && row.checkOut === plannedCheckout && row.checkIn <= today);
+        if (reservation) { reservation.status = 'checked_in'; reservation.roomNumber = room.number; reservation.updatedAt = new Date().toISOString(); room.reservationId = reservation.id; }
+        
+        // Sinh Session Token & Mã PIN bảo mật phòng
+        const stayToken = crypto.randomBytes(4).toString('hex').toUpperCase();
+        const pin = String(crypto.randomInt(1000, 9999));
+        room.status = 'occupied'; room.guestName = guestName; room.guestPhone = guestPhone; room.checkIn = today; room.plannedCheckout = plannedCheckout;
+        room.stayToken = stayToken; room.pin = pin; room.updatedAt = new Date().toISOString();
+      } else if (body.action === 'check_out') {
+        if (!canAccess(role, ['receptionist'])) return sendJson(res, 403, { error: 'Chỉ lễ tân hoặc quản lý được làm thủ tục trả phòng.' });
+        if (room.status !== 'occupied') return sendJson(res, 409, { error: 'Phòng hiện không có khách để trả phòng.' });
+        const unpaidOrders = store.orders.filter(order => order.table === `Phòng ${room.number}` && order.status !== 'paid');
+        
+        // Hỗ trợ quyết toán gộp tiền dịch vụ và tiền phòng khi check-out
+        if (body.settleAll) {
+          const unready = unpaidOrders.filter(o => !['ready', 'served'].includes(o.status));
+          if (unready.length) return sendJson(res, 409, { error: `Còn ${unready.length} dịch vụ đang chế biến / dọn dẹp, chưa hoàn tất phục vụ.` });
+          for (const order of unpaidOrders) {
+            order.status = 'paid';
+            order.paidAt = new Date().toISOString();
+            order.amountPaid = order.totalPrice;
+            order.voucherCode = order.voucherCode || 'CHECKOUT';
+            updateOrder(store, order);
+          }
+        } else if (unpaidOrders.length) {
+          return sendJson(res, 409, { error: 'Chưa thể trả phòng: còn hóa đơn dịch vụ chưa thanh toán hoặc bộ phận chưa hoàn tất. Lễ tân hãy kiểm tra và xác nhận thanh toán trước.' });
+        }
+        room.status = 'cleaning'; room.lastGuestName = room.guestName; room.lastCheckOut = new Date().toISOString();
+        const reservation = store.reservations.find(row => row.id === room.reservationId); if (reservation) { reservation.status = 'completed'; reservation.updatedAt = new Date().toISOString(); }
+        room.reservationId = ''; room.guestName = ''; room.guestPhone = ''; room.checkIn = ''; room.plannedCheckout = '';
+        room.stayToken = ''; room.pin = ''; room.updatedAt = new Date().toISOString();
+      } else if (body.action === 'cleaned') {
+        if (!canAccess(role, ['housekeeping'])) return sendJson(res, 403, { error: 'Chỉ buồng phòng hoặc quản lý được xác nhận phòng đã dọn.' });
+        if (room.status !== 'cleaning') return sendJson(res, 409, { error: 'Phòng này không nằm trong hàng đợi dọn phòng.' });
+        room.status = 'available'; room.updatedAt = new Date().toISOString();
+      } else if (body.action === 'maintenance' || body.action === 'maintenance_done') {
+        if (!canAccess(role, ['receptionist'])) return sendJson(res, 403, { error: 'Chỉ lễ tân hoặc quản lý được cập nhật tình trạng bảo trì.' });
+        if (body.action === 'maintenance' && room.status !== 'available') return sendJson(res, 409, { error: 'Chỉ chuyển phòng trống sang trạng thái bảo trì.' });
+        if (body.action === 'maintenance_done' && room.status !== 'maintenance') return sendJson(res, 409, { error: 'Phòng này không ở trạng thái bảo trì.' });
+        room.status = body.action === 'maintenance' ? 'maintenance' : 'available'; room.updatedAt = new Date().toISOString();
+      } else return sendJson(res, 400, { error: 'Thao tác phòng không hợp lệ.' });
+      writeStore(store); return sendJson(res, 200, { room });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/inventory') {
+      if (!canAccess(getRole(req), ['manager'])) return sendJson(res, getRole(req) ? 403 : 401, { error: 'Chỉ quản lý được xem tồn kho.' });
+      return sendJson(res, 200, { items: readStore().inventory });
+    }
+    const inventoryRoute = url.pathname.match(/^\/api\/inventory\/([^/]+)$/);
+    if (req.method === 'PATCH' && inventoryRoute) {
+      if (!canAccess(getRole(req), ['manager'])) return sendJson(res, getRole(req) ? 403 : 401, { error: 'Chỉ quản lý được điều chỉnh tồn kho.' });
+      const body = await readBody(req); const store = readStore(); const item = store.inventory.find(row => row.id === decodeURIComponent(inventoryRoute[1]));
+      if (!item) return sendJson(res, 404, { error: 'Không tìm thấy mặt hàng.' });
+      const quantity = Number(body.quantity); const minimum = body.minimum === undefined ? item.minimum : Number(body.minimum);
+      if (!Number.isInteger(quantity) || quantity < 0 || !Number.isInteger(minimum) || minimum < 0) return sendJson(res, 400, { error: 'Số lượng và mức tồn tối thiểu phải là số nguyên không âm.' });
+      item.quantity = quantity; item.minimum = minimum; item.updatedAt = new Date().toISOString(); writeStore(store); return sendJson(res, 200, { item });
+    }
+
+    const stationRoute = url.pathname.match(/^\/api\/orders\/([^/]+)\/station$/);
+    if (req.method === 'PATCH' && stationRoute) {
+      if (!getRole(req)) return sendJson(res, 401, { error: 'Cần đăng nhập nhân viên khách sạn.' });
+      const body = await readBody(req); const station = body.station; const status = body.status;
+      if (!canAccess(getRole(req), station === 'housekeeping' ? ['housekeeping'] : ['kitchen'])) return sendJson(res, 403, { error: 'Tài khoản không có quyền xử lý bộ phận này.' });
+      if (!['housekeeping', 'dining'].includes(station) || !['pending', 'cooking', 'ready'].includes(status)) return sendJson(res, 400, { error: 'Trạng thái bộ phận không hợp lệ.' });
+      const store = readStore(); const order = store.orders.find(row => row.id === decodeURIComponent(stationRoute[1]));
+      if (!order || !order.stations[station]) return sendJson(res, 404, { error: 'Không tìm thấy phiếu yêu cầu dịch vụ.' });
+      order.stations[station] = status;
+      const states = Object.values(order.stations).filter(Boolean);
+      order.status = states.every(state => state === 'ready') ? 'ready' : states.some(state => state === 'cooking' || state === 'ready') ? 'cooking' : 'pending';
+      order.updatedAt = new Date().toISOString(); updateOrder(store, order); return sendJson(res, 200, { order });
+    }
+    const payRoute = url.pathname.match(/^\/api\/orders\/([^/]+)\/pay$/);
+    if (req.method === 'POST' && payRoute) {
+      if (!canAccess(getRole(req), ['cashier', 'receptionist'])) return sendJson(res, getRole(req) ? 403 : 401, { error: 'Chỉ lễ tân, thu ngân hoặc quản lý được xác nhận thanh toán.' });
+      const body = await readBody(req); const store = readStore(); const order = store.orders.find(row => row.id === decodeURIComponent(payRoute[1]));
+      if (!order) return sendJson(res, 404, { error: 'Không tìm thấy hóa đơn phòng.' });
+      if (order.status === 'paid') return sendJson(res, 409, { error: 'Hóa đơn này đã thanh toán lúc check-out.' });
+      if (!['ready', 'served'].includes(order.status)) return sendJson(res, 409, { error: 'Chỉ xác nhận thanh toán sau khi bếp và buồng phòng đã hoàn tất phục vụ.' });
+      const code = String(body.voucherCode || '').trim().toUpperCase(); let voucherDiscount = 0;
+      if (code === 'HOTEL10') voucherDiscount = Math.min(Math.round(order.totalPrice * 0.1), 50000);
+      else if (code === 'VIPSTAY' && order.totalPrice >= 200000) voucherDiscount = 50000;
+      else if (code) return sendJson(res, 400, { error: 'Mã ưu đãi không hợp lệ.' });
+      order.voucherCode = code; order.voucherDiscount = voucherDiscount; order.discountTotal = order.promotionDiscount + voucherDiscount;
+      order.amountPaid = Math.max(0, order.totalPrice - voucherDiscount); order.status = 'paid'; order.paidAt = new Date().toISOString(); updateOrder(store, order); return sendJson(res, 200, { order });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/availability') {
+      const checkIn = url.searchParams.get('checkIn') || ''; const checkOut = url.searchParams.get('checkOut') || '';
+      if (!validDate(checkIn) || !validDate(checkOut) || checkOut <= checkIn) return sendJson(res, 400, { error: 'Vui lòng chọn ngày nhận và trả phòng hợp lệ.' });
+      return sendJson(res, 200, { available: availableRooms(readStore(), checkIn, checkOut), checkIn, checkOut });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/reservations') {
+      const body = await readBody(req); const guestName = String(body.guestName || '').trim().slice(0, 80); const phone = String(body.phone || '').trim().slice(0, 30);
+      const email = String(body.email || '').trim().slice(0, 120).toLowerCase(); const roomType = String(body.roomType || '');
+      const checkIn = String(body.checkIn || ''); const checkOut = String(body.checkOut || ''); const guests = Number(body.guests || 1);
+      const roomTypes = { standard: 'Phòng tiêu chuẩn', deluxe: 'Phòng Deluxe', suite: 'Phòng Suite' };
+      if (!guestName || !phone || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !roomTypes[roomType] || !validDate(checkIn) || !validDate(checkOut) || checkOut <= checkIn || !Number.isInteger(guests) || guests < 1 || guests > 4) return sendJson(res, 400, { error: 'Vui lòng nhập họ tên, số điện thoại, email hợp lệ, loại phòng, 1–4 khách và ngày lưu trú hợp lệ.' });
+      const store = readStore(); if (availableRooms(store, checkIn, checkOut) < 1) return sendJson(res, 409, { error: 'Khoảng ngày này đã hết phòng trong hệ thống. Hãy chọn ngày khác hoặc liên hệ tiếp tân.' });
+      const year = new Date().getFullYear(); let id; do { id = `BK-${year}-${crypto.randomInt(1000, 10000)}`; } while (store.reservations.some(row => row.id === id));
+      const reservation = { id, guestName, phone, email, roomType, roomTypeLabel: roomTypes[roomType], checkIn, checkOut, guests, status: 'PENDING', createdAt: new Date().toISOString() };
+      store.reservations.unshift(reservation); writeStore(store); return sendJson(res, 201, { reservation, available: availableRooms(store, checkIn, checkOut) });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/reservations') {
+      if (!canAccess(getRole(req), ['receptionist'])) return sendJson(res, getRole(req) ? 403 : 401, { error: 'Chỉ tiếp tân hoặc quản lý được xem yêu cầu đặt phòng.' });
+      return sendJson(res, 200, { reservations: readStore().reservations });
+    }
+    const reservationRoute = url.pathname.match(/^\/api\/reservations\/([^/]+)$/);
+    const reservationCheckinRoute = url.pathname.match(/^\/api\/reservations\/([^/]+)\/check-in$/);
+    if (req.method === 'GET' && reservationRoute) {
+      const reservation = readStore().reservations.find(row => row.id === decodeURIComponent(reservationRoute[1]));
+      if (!reservation) return sendJson(res, 404, { error: 'Không tìm thấy mã đặt phòng.' });
+      const labels = { pending: 'Đang chờ lễ tân xác nhận', confirmed: 'Đã được lễ tân xác nhận', checked_in: 'Đã nhận phòng', completed: 'Đã hoàn tất lưu trú', rejected: 'Yêu cầu bị từ chối', cancelled: 'Yêu cầu đã hủy' };
+      if (canAccess(getRole(req), ['receptionist'])) return sendJson(res, 200, { reservation: { ...reservation, status: String(reservation.status).toUpperCase() } });
+      return sendJson(res, 200, { reservation: { id: reservation.id, status: reservation.status, statusLabel: labels[String(reservation.status).toLowerCase()] || String(reservation.status), roomType: reservation.roomType, roomTypeLabel: reservation.roomTypeLabel, checkIn: reservation.checkIn, checkOut: reservation.checkOut } });
+    }
+    if (req.method === 'POST' && reservationCheckinRoute) {
+      if (!canAccess(getRole(req), ['receptionist'])) return sendJson(res, getRole(req) ? 403 : 401, { error: 'Chỉ lễ tân hoặc quản lý được làm thủ tục Check-in.' });
+      const bookingId = decodeURIComponent(reservationCheckinRoute[1]);
+      const body = await readBody(req); const roomNumber = Number(body.roomNumber);
+      if (!Number.isInteger(roomNumber)) return sendJson(res, 400, { error: 'Vui lòng chọn số phòng hợp lệ.' });
+      const store = readStore(); const reservation = store.reservations.find(row => row.id === bookingId);
+      if (!reservation) return sendJson(res, 404, { error: 'Không tìm thấy mã đặt phòng.' });
+      if (!['pending', 'confirmed'].includes(String(reservation.status).toLowerCase())) return sendJson(res, 409, { error: 'Booking này không còn ở trạng thái chờ nhận phòng.' });
+      const today = new Date().toISOString().slice(0, 10);
+      if (reservation.checkIn > today || reservation.checkOut <= today) return sendJson(res, 409, { error: 'Ngày lưu trú của booking không phù hợp để nhận phòng hôm nay.' });
+      let room = store.rooms.find(item => item.number === roomNumber);
+      if (!room && roomNumber >= 100 && roomNumber <= 999) { room = { number: roomNumber, status: 'available', guestName: '', guestPhone: '', checkIn: '', plannedCheckout: '' }; store.rooms.push(room); }
+      if (!room) return sendJson(res, 400, { error: 'Số phòng phải từ 100 đến 999.' });
+      if (room.status !== 'available') return sendJson(res, 409, { error: `Phòng ${roomNumber} không còn trống. Hãy tải lại sơ đồ và chọn phòng khác.` });
+      const stayToken = crypto.randomBytes(4).toString('hex').toUpperCase();
+      const pin = String(crypto.randomInt(1000, 9999));
+      room.status = 'occupied'; room.guestName = reservation.guestName; room.guestPhone = reservation.phone;
+      room.checkIn = today; room.plannedCheckout = reservation.checkOut; room.reservationId = reservation.id;
+      room.stayToken = stayToken; room.pin = pin; room.updatedAt = new Date().toISOString();
+      reservation.status = 'CHECKED_IN'; reservation.roomNumber = roomNumber; reservation.checkedInAt = new Date().toISOString(); reservation.updatedAt = reservation.checkedInAt;
+      reservation.serviceUrl = `/khach-hang.html?room=${roomNumber}&token=${stayToken}`;
+      writeStore(store);
+      return sendJson(res, 200, { reservation, room, serviceUrl: reservation.serviceUrl });
+    }
+    if (req.method === 'PATCH' && reservationRoute) {
+      if (!canAccess(getRole(req), ['receptionist'])) return sendJson(res, getRole(req) ? 403 : 401, { error: 'Chỉ tiếp tân hoặc quản lý được cập nhật đặt phòng.' });
+      const body = await readBody(req); if (!['confirmed', 'rejected', 'cancelled'].includes(body.status)) return sendJson(res, 400, { error: 'Trạng thái đặt phòng không hợp lệ.' });
+      const store = readStore(); const reservation = store.reservations.find(row => row.id === decodeURIComponent(reservationRoute[1]));
+      if (!reservation) return sendJson(res, 404, { error: 'Không tìm thấy yêu cầu đặt phòng.' });
+      reservation.status = body.status; reservation.updatedAt = new Date().toISOString(); writeStore(store); return sendJson(res, 200, { reservation });
+    }
+    if (req.method === 'PATCH' && url.pathname.startsWith('/api/')) return sendJson(res, 404, { error: 'API không tồn tại.' });
+
+    let requested = decodeURIComponent(url.pathname === '/' ? '/home.html' : url.pathname);
     if (requested.includes('..')) return sendJson(res, 400, { error: 'Đường dẫn không hợp lệ.' });
-    if (['/kitchen.html', '/admin.html', '/qrcodes/', '/qrcodes/index.html'].includes(requested) && !isStaff(req)) {
-      res.writeHead(302, { Location: `/staff-login.html?next=${encodeURIComponent(requested)}` });
-      return res.end();
-    }
-    const file = path.join(ROOT, requested);
-    if (!file.startsWith(ROOT + path.sep) && file !== ROOT) return sendJson(res, 404, { error: 'Không tìm thấy trang.' });
-    if (!fs.existsSync(file)) return sendJson(res, 404, { error: 'Không tìm thấy trang.' });
-    if (fs.statSync(file).isDirectory()) requested = path.join(requested, 'index.html');
-    const resolvedFile = path.join(ROOT, requested);
-    if (!resolvedFile.startsWith(ROOT + path.sep) || !fs.existsSync(resolvedFile) || !fs.statSync(resolvedFile).isFile()) {
-      return sendJson(res, 404, { error: 'Không tìm thấy trang.' });
-    }
-    const types = {
-      '.html': 'text/html; charset=utf-8',
-      '.js': 'text/javascript; charset=utf-8',
-      '.css': 'text/css; charset=utf-8',
-      '.png': 'image/png',
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.svg': 'image/svg+xml',
-      '.json': 'application/json',
-      '.ico': 'image/x-icon'
+    const role = getRole(req);
+    const legacyRoutes = {
+      '/admin.html': '/manager.html', '/quan-ly.html': '/manager.html',
+      '/cashier.html': '/thu-ngan.html',
+      '/le-tan.html': '/letan.html', '/buong-phong.html': '/van-hanh.html',
+      '/index.html': '/khach-hang.html', '/qrcodes': '/letan.html', '/qrcodes/': '/letan.html', '/qrcodes/index.html': '/letan.html'
     };
-    res.writeHead(200, {
-      'Content-Type': types[path.extname(resolvedFile)] || 'application/octet-stream',
-      'Cache-Control': path.extname(resolvedFile) === '.html' ? 'no-cache' : 'no-store',
-      'X-Content-Type-Options': 'nosniff',
-      'Referrer-Policy': 'strict-origin-when-cross-origin'
-    });
-    fs.createReadStream(resolvedFile).pipe(res);
-  } catch (error) {
-    if (!res.headersSent) sendJson(res, 500, { error: 'Lỗi máy chủ.', detail: error.message });
-    else res.end();
+    if (requested === '/bep.html' || requested === '/kitchen.html' || requested === '/bep-buong-phong.html' || requested === '/bep-buongphong.html') { res.writeHead(302, { Location: '/van-hanh.html#kitchen' }); return res.end(); }
+    if (requested === '/buongphong.html' || requested === '/buong-phong.html') { res.writeHead(302, { Location: '/van-hanh.html#housekeeping' }); return res.end(); }
+    if (legacyRoutes[requested]) { res.writeHead(302, { Location: `${legacyRoutes[requested]}${url.search}${url.hash}` }); return res.end(); }
+    const pageRoles = { '/van-hanh.html': ['kitchen', 'housekeeping'], '/manager.html': ['manager'], '/thu-ngan.html': ['cashier'], '/letan.html': ['receptionist'] };
+    if (pageRoles[requested] && !canAccess(getRole(req), pageRoles[requested])) { res.writeHead(302, { Location: `/staff-login.html?next=${encodeURIComponent(requested)}` }); return res.end(); }
+    const staticRequest = requested;
+    const file = path.join(ROOT, staticRequest);
+    if (!file.startsWith(ROOT + path.sep) || !fs.existsSync(file)) return sendJson(res, 404, { error: 'Không tìm thấy trang.' });
+    let resolvedRequest = staticRequest;
+    if (fs.statSync(file).isDirectory()) resolvedRequest = path.join(staticRequest, 'index.html');
+    const resolvedFile = path.join(ROOT, resolvedRequest);
+    if (!resolvedFile.startsWith(ROOT + path.sep) || !fs.existsSync(resolvedFile) || !fs.statSync(resolvedFile).isFile()) return sendJson(res, 404, { error: 'Không tìm thấy trang.' });
+    const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json' };
+    res.writeHead(200, { 'Content-Type': types[path.extname(resolvedFile)] || 'application/octet-stream', 'Cache-Control': path.extname(resolvedFile) === '.html' ? 'no-cache' : 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin' }); fs.createReadStream(resolvedFile).pipe(res);
+  } catch (error) { if (!res.headersSent) sendJson(res, 500, { error: 'Lỗi máy chủ.', detail: error.message }); else res.end(); }
+});
+
+server.on('listening', () => {
+  console.log(`Cloud Hotel Room Service running at http://localhost:${PORT}`);
+  if (LEGACY_PORT !== PORT) {
+    const legacyServer = http.createServer(server.listeners('request')[0]);
+    legacyServer.on('error', error => console.warn(`Cổng QR cũ ${LEGACY_PORT} không khả dụng: ${error.message}`));
+    legacyServer.listen(LEGACY_PORT, '0.0.0.0', () => console.log(`QR compatibility endpoint running at http://localhost:${LEGACY_PORT}`));
   }
 });
 
-server.on('error', error => {
-  if (error.code === 'EADDRINUSE') console.error(`Cổng ${PORT} đang được dùng.`);
-  else console.error('Không thể khởi động Cloud Hotel POS:', error.message);
-  process.exitCode = 1;
-});
-
-server.listen(PORT, '0.0.0.0', () => console.log(`Cloud Hotel Room Service running at http://localhost:${PORT}`));
+function listenOnAvailablePort() {
+  server.once('error', function retryOrStop(error) {
+    if (error.code === 'EADDRINUSE' && !process.env.PORT && PORT < 3010) {
+      PORT += 1;
+      console.warn(`Cổng đang được dùng; thử cổng ${PORT}...`);
+      listenOnAvailablePort();
+      return;
+    }
+    console.error(`Không thể mở máy chủ tại cổng ${PORT}: ${error.message}`);
+    process.exitCode = 1;
+  });
+  server.listen(PORT, '0.0.0.0');
+}
+listenOnAvailablePort();

@@ -1,43 +1,12 @@
 <!doctype html>
 <html lang="vi">
+
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Lễ tân &amp; Quyết toán phòng · Grand Cloud Hotel</title>
+  <title>Quản lý khách sạn · Grand Cloud Hotel</title>
   <link rel="stylesheet" href="style.css">
   <style>
-    .table-tile {
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .table-tile:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-    }
-    .table-tile.filter-selected {
-      border: 2px solid #2563eb !important;
-      background: #eff6ff !important;
-    }
-    .room-filter-indicator {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: #dbeafe;
-      color: #1e40af;
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 13px;
-      font-weight: 700;
-      margin-left: 12px;
-    }
-    .room-filter-clear {
-      background: none;
-      border: none;
-      color: #dc2626;
-      font-weight: bold;
-      cursor: pointer;
-      padding: 0 4px;
-    }
     .cancel-button {
       background: #fff;
       color: #dc2626;
@@ -57,20 +26,24 @@
       border-left: 4px solid #94a3b8;
     }
   </style>
+  <script src="runtime.js?v=20261103g"></script>
 </head>
+
 <body class="admin-body professional-admin">
   <header class="admin-header">
     <div class="admin-brand">
       <div class="kds-mark">GH</div>
       <div>
-        <p class="eyebrow">GRAND HOTEL · FRONT DESK &amp; BILLING</p>
-        <h1>Lễ tân &amp; Quản lý dịch vụ phòng</h1>
+        <p class="eyebrow">GRAND HOTEL · MANAGER DASHBOARD</p>
+        <h1>Quản lý toàn khách sạn</h1>
         <span id="cashierConnection" class="connection-state">Đang kết nối hệ thống khách sạn…</span>
       </div>
     </div>
     <nav class="staff-nav">
-      <a href="kitchen.html">Buồng phòng &amp; Phục vụ</a>
-      <a href="qrcodes/">In QR phòng</a>
+      <a href="bo-phan.html">Cổng nội bộ</a>
+      <a href="letan.html">Tiếp tân &amp; QR</a>
+      <a href="thu-ngan.html">Thu ngân</a>
+      <a href="van-hanh.html">Điều phối Bếp &amp; Buồng phòng</a>
       <button id="cashierLogout" class="staff-logout">Đăng xuất</button>
     </nav>
   </header>
@@ -94,23 +67,42 @@
       </article>
     </section>
 
+    <section class="manager-workbench">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">VIỆC CẦN THEO DÕI</p>
+          <h2>Ưu tiên vận hành hôm nay</h2>
+        </div>
+      </div>
+      <ul id="managerTasks" class="manager-task-list">
+        <li>Đang tổng hợp tình hình khách sạn…</li>
+      </ul>
+    </section>
+
     <section class="admin-section">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">SƠ ĐỒ LƯU TRÚ (CHẠM VÀO PHÒNG ĐỂ LỌC HÓA ĐƠN)</p>
-          <h2>Tình trạng các phòng (Phòng 101 - 112)
-            <span id="selectedRoomBadge" style="display:none;" class="room-filter-indicator">
-              Đang lọc: <b id="selectedRoomText">Phòng 101</b>
-              <button class="room-filter-clear" id="btnClearRoomFilter" title="Xem tất cả các phòng">&times;</button>
-            </span>
-          </h2>
+          <p class="eyebrow">SƠ ĐỒ LƯU TRÚ</p>
+          <h2>Sơ đồ phòng &amp; tình trạng lưu trú</h2>
         </div>
         <div class="legend">
-          <i class="free-dot"></i> Phòng trống 
-          <i class="busy-dot"></i> Đang có yêu cầu dịch vụ
+          <i class="free-dot"></i> Trống
+          <i class="busy-dot"></i> Có khách
+          <span>· Chờ dọn / bảo trì được tô màu riêng</span>
         </div>
       </div>
       <div id="tablesGrid" class="tables-grid"></div>
+    </section>
+
+    <section class="admin-section inventory-section">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">TỒN KHO BUỒNG PHÒNG · BẾP · MINIBAR</p>
+          <h2>Hàng hóa cần bổ sung</h2>
+        </div><span id="inventoryLowCount" class="inventory-low-count">0 mặt hàng cần bổ sung</span>
+      </div>
+      <div id="inventoryAlerts" class="inventory-alerts"></div>
+      <div id="inventoryGrid" class="inventory-grid"></div>
     </section>
 
     <section class="admin-section">
@@ -154,8 +146,26 @@
     </section>
   </main>
 
-  <section id="receiptPrint" class="receipt-print"></section>
+  <!-- Modal VietQR Quản lý & Thu ngân -->
+  <div id="cashierVietqrModal" class="guest-qr-backdrop" hidden>
+    <section class="guest-qr-dialog" role="dialog" aria-modal="true" style="max-width: 440px;">
+      <h2 id="cashierVietqrTitle">Mã VietQR chuyển khoản</h2>
+      <p id="cashierVietqrBank" style="margin-bottom: 4px; font-weight:700; color:#1e293b;">MBBank · STK: 0901234567 ·
+        GRAND CLOUD HOTEL</p>
+      <p id="cashierVietqrMemo" style="margin-bottom: 12px; font-size:12px; color:#64748b;"></p>
+      <img id="cashierVietqrImg" alt="VietQR Thanh toán">
+      <div style="margin: 12px 0 6px;">
+        <span style="font-size:13px; color:#64748b;">Số tiền thanh toán:</span>
+        <strong id="cashierVietqrAmount" style="font-size:20px; color:#b45309; display:block;"></strong>
+      </div>
+      <div class="guest-qr-actions">
+        <button id="closeCashierVietqrBtn" type="button">Đóng cửa sổ</button>
+      </div>
+    </section>
+  </div>
 
+  <section id="receiptPrint" class="receipt-print"></section>
   <script src="admin.js"></script>
 </body>
+
 </html>

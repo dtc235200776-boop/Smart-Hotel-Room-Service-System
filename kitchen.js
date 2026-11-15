@@ -1,26 +1,32 @@
 const money = value => Number(value || 0) === 0 ? 'Miễn phí' : `${Number(value || 0).toLocaleString('vi-VN')}đ`;
-const API_BASE = (location.port === '5500') ? `${location.protocol}//${location.hostname}:3000` : '';
+const API_BASE = '';
 const apiUrl = path => `${API_BASE}${path}`;
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 let orders = [];
 let previousOrderIds = new Set();
-let currentFilter = 'active'; // 'active' (pending + cooking), 'all', 'ready'
+let staffRole = null;
+const visibleStations = () => staffRole === 'manager' ? ['housekeeping', 'dining'] : staffRole === 'housekeeping' ? ['housekeeping'] : ['dining'];
+let activeOpsTab = location.hash === '#housekeeping' ? 'housekeeping' : 'kitchen';
+
 let audioCtx = null;
-
-function getAudioContext() {
-  if (!audioCtx) {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-    if (AudioContextClass) audioCtx = new AudioContextClass();
-  }
-  if (audioCtx && audioCtx.state === 'suspended') {
-    audioCtx.resume().catch(() => {});
-  }
-  return audioCtx;
+function playAlert() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    const tone = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    tone.frequency.setValueAtTime(880, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    tone.connect(gain);
+    gain.connect(audioCtx.destination);
+    tone.start(audioCtx.currentTime);
+    tone.stop(audioCtx.currentTime + 0.2);
+  } catch (_) {}
 }
-
-// Mở khóa âm thanh khi người dùng tương tác lần đầu
-window.addEventListener('click', () => getAudioContext(), { once: true });
-window.addEventListener('keydown', () => getAudioContext(), { once: true });
+window.addEventListener('click', () => {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+}, { once: true });
 
 function updateKitchenClock() {
   const clock = document.getElementById('kdsClock');
@@ -32,40 +38,15 @@ setInterval(updateKitchenClock, 1000);
 async function api(url, options = {}) {
   const response = await fetch(apiUrl(url), { credentials: 'include', ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
   const result = response.status === 204 ? {} : await response.json();
-  if (response.status === 401) { location.replace(`/staff-login.html?next=${encodeURIComponent('/kitchen.html')}`); throw new Error('Cần đăng nhập nhân viên khách sạn.'); }
+  if (response.status === 401) { location.replace(`/staff-login.html?next=${encodeURIComponent(location.pathname)}`); throw new Error('Cần đăng nhập nhân viên khách sạn.'); }
   if (!response.ok) throw new Error(result.error || 'Không thể kết nối máy chủ.');
   return result;
 }
 
-function playAlert() {
-  try {
-    const ctx = getAudioContext();
-    if (!ctx) return;
-    const tone = ctx.createOscillator();
-    const gain = ctx.createGain();
-    tone.type = 'sine';
-    tone.frequency.setValueAtTime(880, ctx.currentTime);
-    tone.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.2);
-    gain.gain.setValueAtTime(0.2, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
-    tone.connect(gain);
-    gain.connect(ctx.destination);
-    tone.start(ctx.currentTime);
-    tone.stop(ctx.currentTime + 0.3);
-  } catch (_) {}
-}
-
 function renderStation(station, rootId, countId) {
-  let stationOrders = orders.filter(order => order.status !== 'paid' && order.status !== 'cancelled' && order.stations?.[station]);
-  
-  if (currentFilter === 'active') {
-    stationOrders = stationOrders.filter(order => order.stations[station] === 'pending' || order.stations[station] === 'cooking');
-  } else if (currentFilter === 'ready') {
-    stationOrders = stationOrders.filter(order => order.stations[station] === 'ready');
-  }
-
-  document.getElementById(countId).textContent = `${stationOrders.length} yêu cầu`;
-  document.getElementById(rootId).innerHTML = stationOrders.length ? stationOrders.map(order => {
+  const active = orders.filter(order => order.status !== 'paid' && order.status !== 'cancelled' && order.stations?.[station]);
+  document.getElementById(countId).textContent = `${active.length} yêu cầu`;
+  document.getElementById(rootId).innerHTML = active.length ? active.map(order => {
     const status = order.stations[station];
     const items = order.items.filter(item => item.section === station);
     const minutes = Math.max(0, Math.floor((Date.now() - Date.parse(order.createdAt)) / 60000));
@@ -92,87 +73,100 @@ function renderStation(station, rootId, countId) {
         </ul>
         <footer>${action}</footer>
       </article>`;
-  }).join('') : '<div class="station-empty"><span>✓</span><b>Không có yêu cầu nào</b><small>Yêu cầu dịch vụ từ khách sẽ tự động xuất hiện tại đây</small></div>';
+  }).join('') : '<div class="station-empty"><span>✓</span><b>Chưa có yêu cầu mới</b><small>Yêu cầu dịch vụ từ khách sẽ tự động xuất hiện tại đây</small></div>';
 }
 
 function renderKitchen() {
+  const stations = visibleStations();
   const activeOrders = orders.filter(order => order.status !== 'paid' && order.status !== 'cancelled');
-  const pending = activeOrders.reduce((sum, order) => sum + Object.values(order.stations || {}).filter(status => status === 'pending').length, 0);
-  const cooking = activeOrders.reduce((sum, order) => sum + Object.values(order.stations || {}).filter(status => status === 'cooking').length, 0);
+  const pending = activeOrders.reduce((sum, order) => sum + stations.filter(station => order.stations?.[station === 'dining' ? 'dining' : 'housekeeping'] === 'pending').length, 0);
+  const cooking = activeOrders.reduce((sum, order) => sum + stations.filter(station => order.stations?.[station] === 'cooking').length, 0);
   const ready = activeOrders.filter(order => order.status === 'ready' || order.status === 'served').length;
-  
   document.getElementById('pendingTotal').textContent = pending;
   document.getElementById('cookingTotal').textContent = cooking;
   document.getElementById('readyTotal').textContent = ready;
-  
-  renderStation('housekeeping', 'foodTickets', 'foodTicketCount');
-  renderStation('dining', 'drinkTickets', 'drinkTicketCount');
+  if (stations.includes('housekeeping')) renderStation('housekeeping', 'foodTickets', 'foodTicketCount');
+  if (stations.includes('dining')) renderStation('dining', 'drinkTickets', 'drinkTicketCount');
+  const houseCount = orders.filter(order => order.status !== 'paid' && order.status !== 'cancelled' && order.stations?.housekeeping).length;
+  const diningCount = orders.filter(order => order.status !== 'paid' && order.status !== 'cancelled' && order.stations?.dining).length;
+  document.getElementById('housekeepingTabCount')?.replaceChildren(document.createTextNode(houseCount));
+  document.getElementById('diningTabCount')?.replaceChildren(document.createTextNode(diningCount));
 }
 
-async function loadOrders() {
-  orders = (await api('/api/orders')).orders;
-  renderKitchen();
+function selectOpsTab(tab) {
+  const station = tab === 'housekeeping' ? 'housekeeping' : 'dining';
+  if (!visibleStations().includes(station)) return;
+  activeOpsTab = tab;
+  document.querySelectorAll('[data-ops-tab]').forEach(button => button.classList.toggle('active', button.dataset.opsTab === tab));
+  document.querySelector('[data-station-panel="kitchen"]').hidden = tab !== 'kitchen' || !visibleStations().includes('dining');
+  document.querySelector('[data-station-panel="housekeeping"]').hidden = tab !== 'housekeeping' || !visibleStations().includes('housekeeping');
+  document.querySelector('[data-room-turnover]').hidden = tab !== 'housekeeping' || !['housekeeping', 'manager'].includes(staffRole);
+  history.replaceState(null, '', `${location.pathname}${location.search}#${tab}`);
 }
 
+async function loadTurnoverRooms() {
+  const panel = document.querySelector('[data-room-turnover]'); if (!panel) return;
+  panel.hidden = !['housekeeping', 'manager'].includes(staffRole); if (panel.hidden) return;
+  const root = document.getElementById('turnoverRooms');
+  try {
+    const response = await fetch(apiUrl('/api/rooms'), { credentials: 'include', cache: 'no-store' }); const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Không tải được phòng chờ dọn.');
+    const cleaning = data.rooms.filter(room => room.status === 'cleaning');
+    document.getElementById('turnoverCount').textContent = `${cleaning.length} phòng`;
+    root.innerHTML = cleaning.length ? cleaning.map(room => `<article class="turnover-room"><div><strong>Phòng ${room.number}</strong><small>${room.lastGuestName ? `Khách vừa trả: ${escapeHtml(room.lastGuestName)}` : 'Đã trả phòng · cần làm vệ sinh'}</small></div><button data-room-cleaned="${room.number}">Xác nhận phòng đã sạch</button></article>`).join('') : '<div class="station-empty"><span>✓</span><b>Chưa có phòng chờ dọn</b><small>Phòng vừa trả sẽ xuất hiện tại đây</small></div>';
+  } catch (error) { root.textContent = error.message; }
+}
+
+async function loadOrders() { orders = (await api('/api/orders')).orders; renderKitchen(); }
 document.addEventListener('click', async event => {
-  const button = event.target.closest('[data-order][data-station]');
-  if (!button) return;
+  const cleanButton = event.target.closest('[data-room-cleaned]');
+  if (cleanButton) {
+    cleanButton.disabled = true;
+    try { await api(`/api/rooms/${cleanButton.dataset.roomCleaned}`, { method: 'PATCH', body: JSON.stringify({ action: 'cleaned' }) }); await loadTurnoverRooms(); }
+    catch (error) { alert(error.message); cleanButton.disabled = false; }
+    return;
+  }
+  const button = event.target.closest('[data-order][data-station]'); if (!button) return;
   button.disabled = true;
   try {
-    await api(`/api/orders/${encodeURIComponent(button.dataset.order)}/station`, {
-      method: 'PATCH',
-      body: JSON.stringify({ station: button.dataset.station, status: button.dataset.status })
-    });
+    await api(`/api/orders/${encodeURIComponent(button.dataset.order)}/station`, { method: 'PATCH', body: JSON.stringify({ station: button.dataset.station, status: button.dataset.status }) });
     await loadOrders();
-  } catch (error) {
-    alert(error.message);
-    button.disabled = false;
-  }
+    await loadTurnoverRooms();
+  } catch (error) { alert(error.message); button.disabled = false; }
 });
-
-document.querySelectorAll('[data-kds-filter]').forEach(button => {
-  button.addEventListener('click', () => {
-    document.querySelectorAll('[data-kds-filter]').forEach(btn => btn.classList.remove('active'));
-    button.classList.add('active');
-    currentFilter = button.dataset.kdsFilter;
-    renderKitchen();
-  });
-});
-
-document.getElementById('logoutButton')?.addEventListener('click', async () => {
-  await api('/api/logout', { method: 'POST' });
-  location.replace('/index.html');
-});
+document.getElementById('logoutButton').addEventListener('click', async () => { await api('/api/logout', { method: 'POST' }); location.replace('/bo-phan.html'); });
 
 (async () => {
   try {
+    const sessionResponse = await fetch(apiUrl('/api/session'), { credentials: 'include' });
+    const session = await sessionResponse.json();
+    staffRole = session.role;
+    if (!location.hash) activeOpsTab = staffRole === 'housekeeping' ? 'housekeeping' : 'kitchen';
+    const allowedStations = visibleStations();
+    document.querySelectorAll('[data-ops-tab]').forEach(button => {
+      const station = button.dataset.opsTab === 'housekeeping' ? 'housekeeping' : 'dining';
+      button.hidden = !allowedStations.includes(station);
+      button.addEventListener('click', () => selectOpsTab(button.dataset.opsTab));
+    });
+    document.querySelectorAll('[data-manager-link]').forEach(link => { link.hidden = staffRole !== 'manager'; });
+    document.querySelector('[data-room-turnover]').hidden = !['housekeeping', 'manager'].includes(staffRole);
+    document.getElementById('shiftLabel').textContent = staffRole === 'housekeeping' ? 'CA BUỒNG PHÒNG' : staffRole === 'kitchen' ? 'CA TRỰC BẾP' : 'QUẢN LÝ CA';
+    selectOpsTab(activeOpsTab);
     await loadOrders();
+    await loadTurnoverRooms();
     previousOrderIds = new Set(orders.map(order => order.id));
-    const conn = document.getElementById('connectionState');
-    if (conn) {
-      conn.textContent = '● Đang đồng bộ trực tiếp';
-      conn.classList.add('connected');
-    }
+    document.getElementById('connectionState').textContent = '● Đang đồng bộ trực tiếp';
+    document.getElementById('connectionState').classList.add('connected');
     const events = new EventSource(apiUrl('/api/events'), { withCredentials: true });
     events.addEventListener('order', event => {
-      const order = JSON.parse(event.data);
-      const isNew = !previousOrderIds.has(order.id);
+      const order = JSON.parse(event.data); const isNew = !previousOrderIds.has(order.id);
       if (isNew) playAlert();
       previousOrderIds.add(order.id);
       const index = orders.findIndex(item => item.id === order.id);
-      if (index < 0) orders.unshift(order);
-      else orders[index] = order;
+      if (index < 0) orders.unshift(order); else orders[index] = order;
       renderKitchen();
     });
-    events.onerror = () => {
-      const conn = document.getElementById('connectionState');
-      if (conn) {
-        conn.textContent = 'Đang khôi phục kết nối…';
-        conn.classList.remove('connected');
-      }
-    };
-  } catch (error) {
-    const conn = document.getElementById('connectionState');
-    if (conn) conn.textContent = error.message;
-  }
+    if (staffRole === 'housekeeping' || staffRole === 'manager') setInterval(loadTurnoverRooms, 10000);
+    events.onerror = () => { document.getElementById('connectionState').textContent = 'Đang khôi phục kết nối…'; document.getElementById('connectionState').classList.remove('connected'); };
+  } catch (error) { document.getElementById('connectionState').textContent = error.message; }
 })();
