@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Thu ngân · Grand Cloud Hotel</title>
+  <title>Thu ngân · GOLDEN HAVEN</title>
   <link rel="stylesheet" href="style.css">
   <script src="runtime.js?v=20261103g"></script>
 </head>
@@ -12,7 +12,7 @@
     <div class="admin-brand">
       <div class="kds-mark">GH</div>
       <div>
-        <p class="eyebrow">GRAND HOTEL · CASHIER · CHECK-OUT</p>
+        <p class="eyebrow">GOLDEN HAVEN · CASHIER · CHECK-OUT</p>
         <h1>Quầy thu ngân · Quyết toán phòng</h1>
         <span id="cashierConnection" class="connection-state">Đang kết nối hệ thống khách sạn…</span>
       </div>
@@ -24,6 +24,24 @@
   </header>
 
   <main class="admin-main">
+    <section class="admin-section" aria-labelledby="cashierFolioTitle">
+      <div class="section-heading">
+        <div>
+          <h2 id="cashierFolioTitle">Phiếu quyết toán theo phòng</h2>
+          <p>Tiền lưu trú và dịch vụ được tổng hợp theo từng lượt khách. Hóa đơn đã thu được lưu để in lại.</p>
+        </div>
+        <div class="bill-tabs" aria-label="Danh sách phiếu">
+          <button type="button" class="active" data-folio-view="active" aria-pressed="true">Đang lưu trú</button>
+          <button type="button" data-folio-view="receipts" aria-pressed="false">Hóa đơn đã thanh toán</button>
+        </div>
+      </div>
+      <label class="folio-search">Tìm theo phòng, tên khách hoặc mã hóa đơn
+        <input id="cashierFolioSearch" type="search" placeholder="Ví dụ: 105 hoặc HD-…" autocomplete="off">
+      </label>
+      <p id="cashierFolioNotice" role="status"></p>
+      <div id="cashierFolioList" class="bills-list"><p class="admin-empty">Đang tải phiếu quyết toán…</p></div>
+    </section>
+
     <section class="admin-stats cashier-stats">
       <article>
         <span>Doanh thu dịch vụ hôm nay</span>
@@ -31,7 +49,7 @@
         <small id="revenueOrderCount">0 lượt yêu cầu</small>
       </article>
       <article>
-        <span>Phòng chờ quyết toán Check-out</span>
+        <span>Đơn dịch vụ chờ thu</span>
         <strong id="unpaidStat">0</strong>
         <small>Dịch vụ đã hoàn tất phục vụ</small>
       </article>
@@ -46,12 +64,13 @@
       <div class="section-heading">
         <div>
           <p class="eyebrow">THU NGÂN · KẾT NỐI VỚI TIẾP TÂN</p>
-          <h2>Quyết toán hóa đơn dịch vụ</h2>
-          <p>Nhận các dịch vụ đã hoàn tất theo phòng, áp dụng mã ưu đãi và ghi nhận doanh thu cho báo cáo quản lý.</p>
+          <h2>Thanh toán riêng từng đơn dịch vụ</h2>
+          <p>Dùng khi khách muốn trả riêng hoặc áp dụng mã ưu đãi. Khoản đã thu sẽ hiện trên phiếu tổng hợp.</p>
         </div>
         <div class="bill-tabs">
           <button class="active" data-bill-view="unpaid">Chờ quyết toán</button>
           <button data-bill-view="paid">Đã quyết toán</button>
+          <button data-bill-view="cancelled">Đã hủy</button>
         </div>
       </div>
       <div id="billsList" class="bills-list"></div>
@@ -63,7 +82,7 @@
   <div id="cashierVietqrModal" class="guest-qr-backdrop" hidden>
     <section class="guest-qr-dialog" role="dialog" aria-modal="true" style="max-width: 440px;">
       <h2 id="cashierVietqrTitle">Mã VietQR chuyển khoản</h2>
-      <p id="cashierVietqrBank" style="margin-bottom: 4px; font-weight:700; color:#1e293b;">MBBank · STK: 0901234567 · GRAND CLOUD HOTEL</p>
+      <p id="cashierVietqrBank"></p>
       <p id="cashierVietqrMemo" style="margin-bottom: 12px; font-size:12px; color:#64748b;"></p>
       <img id="cashierVietqrImg" alt="VietQR Thanh toán">
       <div style="margin: 12px 0 6px;">
@@ -77,7 +96,10 @@
   </div>
 
   <section id="receiptPrint" class="receipt-print"></section>
+  <script src="folio-ui.js"></script>
+  <script src="payment-qr.js"></script>
   <script src="admin.js"></script>
+  <script src="cashier-folios.js"></script>
 </body>
 </html>
 

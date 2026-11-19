@@ -30,18 +30,11 @@ let cart = {};
 let currentTable = null; // Số phòng (ví dụ: Phòng 101)
 let currentStayToken = '';
 let currentPin = '';
+let guestUpdates = null;
 const API_BASE = '';
 const apiUrl = path => `${API_BASE}${path}`;
 const money = value => Number(value || 0) === 0 ? 'Miễn phí' : `${Number(value || 0).toLocaleString('vi-VN')}đ`;
 
-// Hàm tạo URL mã VietQR chuẩn ngân hàng
-function getVietQrUrl(amount, memo) {
-  const bank = 'MB';
-  const accountNo = '0901234567';
-  const accountName = 'GRAND CLOUD HOTEL';
-  const cleanMemo = encodeURIComponent(String(memo || '').replace(/[^a-zA-Z0-9 ]/g, '').trim().slice(0, 50));
-  return `https://img.vietqr.io/image/${bank}-${accountNo}-compact2.png?amount=${Math.round(amount)}&addInfo=${cleanMemo}&accountName=${encodeURIComponent(accountName)}`;
-}
 const menuIllustrations = Object.fromEntries(Array.from({ length: 22 }, (_, index) => {
   const id = index + 1;
   return [id, `<svg class="menu-illustration" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><use href="assets/menu-illustrations.svg#menu-${id}"></use></svg>`];
@@ -66,16 +59,29 @@ document.addEventListener('error', event => {
 }, true);
 
 async function getOrders() {
-  try {
-    const response = await fetch(apiUrl(`/api/orders?table=${encodeURIComponent(currentTable)}`), { credentials: 'include' });
-    if (!response.ok) throw new Error('Không đọc được API server');
-    return (await response.json()).orders;
-  } catch (_) {
-    const local = JSON.parse(localStorage.getItem('cloud_hotel_orders') || '[]');
-    return local.filter(order => order.table === currentTable);
-  }
+  if (!currentStayToken) return [];
+  const params = new URLSearchParams({ table: currentTable, token: currentStayToken });
+  const response = await fetch(apiUrl(`/api/orders?${params}`), { credentials: 'include' });
+  if (!response.ok) throw new Error((await response.json()).error || 'Không tải được yêu cầu của phòng.');
+  return (await response.json()).orders;
 }
 
+function connectGuestUpdates() {
+  guestUpdates?.close();
+  if (!currentTable || !currentStayToken) return;
+  const params = new URLSearchParams({ table: currentTable, token: currentStayToken });
+  guestUpdates = new EventSource(apiUrl(`/api/events?${params}`), { withCredentials: true });
+  guestUpdates.addEventListener('order', renderCustomerStatus);
+  guestUpdates.addEventListener('stay-ended', () => {
+    guestUpdates.close();
+    currentStayToken = '';
+    currentPin = '';
+    sessionStorage.removeItem(`room_token_${currentTable.replace(/\D/g, '')}`);
+    const area = document.getElementById('customerOrders');
+    if (area) area.textContent = 'Phiên lưu trú đã kết thúc. Vui lòng liên hệ lễ tân nếu cần hỗ trợ.';
+  });
+  guestUpdates.onopen = renderCustomerStatus;
+}
 function renderMenu() {
   const query = (document.getElementById('menuSearch')?.value || '').trim().toLocaleLowerCase('vi');
   const serviceLabels = { all: 'Tất cả dịch vụ', cleaning: 'Dọn phòng & Vệ sinh', amenities: 'Mượn đồ dùng', laundry: 'Giặt ủi', rental: 'Thuê xe & Đưa đón' };
@@ -182,7 +188,7 @@ async function renderCustomerStatus() {
   try { active = (await getOrders()).slice(0, 5); }
   catch (error) { area.innerHTML = `<p class="connection-error">${error.message} Vui lòng tải lại trang.</p>`; return; }
   area.innerHTML = active.length ? `<h2>Yêu cầu của ${currentTable}</h2>${active.map(order => {
-    const label = { pending: 'Lễ tân đã tiếp nhận', cooking: 'Nhân viên đang thực hiện', ready: 'Đã hoàn tất phục vụ', served: 'Đã phục vụ', paid: 'Đã thanh toán lúc check-out' }[order.status] || 'Đang xử lý';
+    const label = { pending: 'Đã gửi yêu cầu', cooking: 'Nhân viên đang thực hiện', ready: 'Đã hoàn tất phục vụ', served: 'Đã phục vụ', paid: 'Đã thanh toán', cancelled: 'Đã hủy' }[order.status] || 'Đang xử lý';
     return `
       <article class="customer-order-card">
         <div>
@@ -237,9 +243,8 @@ window.printReceipt = async id => {
   const order = (await getOrders()).find(row => row.id === id); if (!order) return;
   const receipt = document.getElementById('receiptPrint');
   const amountToPay = order.amountPaid ?? order.totalPrice;
-  const qrUrl = getVietQrUrl(amountToPay, `THANHTOAN ${order.table} ${order.id}`);
   receipt.innerHTML = `
-    <h2>Grand Cloud Hotel &amp; Resort</h2>
+    <h2>GOLDEN HAVEN &amp; Resort</h2>
     <p>${order.status === 'paid' ? 'HÓA ĐƠN DỊCH VỤ PHÒNG (ĐÃ THANH TOÁN)' : 'PHIẾU XÁC NHẬN DỊCH VỤ TẠI PHÒNG'} · ${escapeHtml(order.table)}</p>
     <p>Mã yêu cầu: ${escapeHtml(order.id)} · ${new Date(order.createdAt).toLocaleString('vi-VN')}</p>
     <hr>${order.items.map(item => `<p>${item.qty} × ${escapeHtml(item.name)} ${money(item.total)}</p>${item.salePercent ? `<small>Ưu đãi phòng: -${item.salePercent}%</small>` : ''}${item.note ? `<small>Ghi chú: ${escapeHtml(item.note)}</small>` : ''}`).join('')}
@@ -247,12 +252,7 @@ window.printReceipt = async id => {
     <p>Tạm tính dịch vụ: <b>${money(order.totalPrice)}</b></p>
     ${order.voucherDiscount ? `<p>Ưu đãi ${escapeHtml(order.voucherCode)}: -${money(order.voucherDiscount)}</p>` : ''}
     <p>Tổng thanh toán: <b>${money(amountToPay)}</b></p>
-    <div style="text-align:center; margin: 15px 0;">
-      <p style="font-weight:700; margin-bottom:5px; font-size:13px;">Mã VietQR chuyển khoản dịch vụ:</p>
-      <img src="${qrUrl}" alt="Mã VietQR chuyển khoản" style="width:160px; height:160px; border:1px solid #ddd; border-radius:8px; display:inline-block;">
-      <p style="font-size:11px; color:#555; margin-top:4px;">MBBank · STK: 0901234567 · GRAND CLOUD HOTEL</p>
-    </div>
-    <p>${order.status === 'paid' ? 'Đã thanh toán. Chúc quý khách kỳ nghỉ tuyệt vời!' : 'Quý khách có thể chuyển khoản bằng VietQR ở trên hoặc thanh toán khi check-out.'}</p>`;
+    <p>${order.status === 'paid' ? 'Đã thanh toán. Chúc quý khách kỳ nghỉ tuyệt vời!' : order.status === 'cancelled' ? 'Yêu cầu đã hủy.' : 'Quý khách có thể thanh toán tại quầy hoặc khi trả phòng.'}</p>`;
   window.print();
 };
 
@@ -325,6 +325,8 @@ async function init() {
       currentPin = pinVal;
       sessionStorage.setItem(`room_token_${roomNum}`, data.token);
       document.getElementById('pinAuthModal')?.classList.remove('active');
+      connectGuestUpdates();
+      renderCustomerStatus();
     } catch (err) {
       if (errBox) {
         errBox.textContent = err.message;
@@ -356,11 +358,6 @@ async function init() {
   document.getElementById('btnSubmitOrder')?.addEventListener('click', submitOrder);
   document.getElementById('btnCloseSuccess')?.addEventListener('click', () => document.getElementById('successModal')?.classList.remove('active'));
   
-  if (currentTable) {
-    try {
-      const updates = new EventSource(apiUrl(`/api/events?table=${encodeURIComponent(currentTable)}`), { withCredentials: true });
-      updates.addEventListener('order', renderCustomerStatus);
-    } catch (_) {}
-  }
+  connectGuestUpdates();
 }
 document.addEventListener('DOMContentLoaded', init);

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lễ tân · Tiếp nhận khách &amp; QR phòng · Grand Cloud Hotel</title>
+  <title>Lễ tân · Tiếp nhận khách &amp; QR phòng · GOLDEN HAVEN</title>
   <link rel="stylesheet" href="style.css">
   <style>
     :root {
@@ -59,6 +59,7 @@
     .paid-tag { color:#15803d; font-size:12px; }
     .guest-qr-backdrop { position:fixed; inset:0; z-index:10000; display:grid; place-items:center; padding:18px; background:#172235b8; }
     .guest-qr-backdrop[hidden] { display:none !important; }
+    #vietqrBackdrop { z-index: 11100; }
     .guest-qr-dialog { width:min(420px,100%); padding:22px; border-radius:18px; background:#fff; text-align:center; box-shadow:0 24px 80px #0005; }
     .guest-qr-dialog h2 { margin:0 0 6px; color:#4c3828; }.guest-qr-dialog p { margin:0 0 14px; color:#64748b; font-size:13px; }
     .guest-qr-dialog img { width:min(260px,75vw); height:auto; aspect-ratio:1; border:1px solid #e2e8f0; border-radius:12px; background:#fff; }
@@ -403,7 +404,7 @@
     <section class="booking-confirm-card" role="dialog" aria-modal="true" aria-labelledby="bookingConfirmTitle">
       <h2 id="bookingConfirmTitle">Xác nhận thông tin Check-in</h2><p>Đối chiếu thông tin khách và chọn phòng thực tế còn trống.</p>
       <div id="bookingConfirmDetails" class="booking-confirm-details"></div>
-      <form id="bookingCheckinForm"><label>Gán số phòng<select name="roomNumber" id="bookingRoomSelect" required></select></label><label id="customRoomWrap" hidden>Nhập số phòng thực tế<input id="customRoomNumber" type="number" min="100" max="999" placeholder="Ví dụ: 302"></label><div class="booking-confirm-actions"><button type="button" id="cancelBookingCheckin">Hủy</button><button type="submit">Xác nhận Check-in</button></div></form>
+      <form id="bookingCheckinForm"><label>Phòng trống đúng loại<select name="roomNumber" id="bookingRoomSelect" required></select></label><div class="booking-confirm-actions"><button type="button" id="cancelBookingCheckin">Hủy</button><button type="submit">Xác nhận Check-in</button></div></form>
     </section>
   </div>
 
@@ -411,7 +412,7 @@
   <div id="checkoutFolioBackdrop" class="booking-confirm-backdrop" hidden>
     <section class="booking-confirm-card" role="dialog" aria-modal="true" aria-labelledby="checkoutFolioTitle" style="max-width: 540px;">
       <h2 id="checkoutFolioTitle">Quyết toán trả phòng (Check-out)</h2>
-      <p>Tổng hợp tiền phòng lưu trú, các dịch vụ ăn uống &amp; tiện ích kèm mã VietQR.</p>
+      <p>Tiền phòng và dịch vụ của lượt lưu trú. Thời gian hiển thị theo giờ Việt Nam.</p>
       <div id="checkoutFolioDetails"></div>
       <div class="booking-confirm-actions" style="margin-top: 14px; display:flex; flex-wrap:wrap; gap:8px;">
         <button type="button" id="cancelCheckoutFolioBtn" style="flex:1;">Đóng</button>
@@ -442,6 +443,8 @@
 
   <script src="assets/vendor/qrcode-generator.js"></script>
   <script src="qr.js"></script>
-  <script src="letan.js?v=room-qr"></script>
+  <script src="folio-ui.js"></script>
+  <script src="payment-qr.js"></script>
+  <script src="letan.js?v=folio"></script>
 </body>
 </html>

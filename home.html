@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#493321">
-  <title>Grand Cloud Hotel &amp; Resort · Nghỉ dưỡng giữa lòng thành phố</title>
+  <title>GOLDEN HAVEN &amp; Resort · Nghỉ dưỡng giữa lòng thành phố</title>
   <link rel="stylesheet" href="style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
 <body class="hotel-home">
   <div class="home-topline"><span>✦ Trải nghiệm nghỉ dưỡng chỉn chu</span></div>
   <header class="home-header">
-    <a class="home-brand" href="/" aria-label="Grand Cloud Hotel - Trang chủ"><span>G</span><span><b>GRAND CLOUD</b><small>HOTEL &amp; RESORT</small></span></a>
+    <a class="home-brand" href="/" aria-label="GOLDEN HAVEN - Trang chủ"><span>G</span><span><b>GOLDEN HAVEN</b><small>HOTEL &amp; RESORT</small></span></a>
     <nav aria-label="Điều hướng chính">
       <a class="current" href="/">Trang chủ</a>
       <a href="#experience">Trải nghiệm</a>
@@ -31,10 +31,10 @@
 
   <main>
     <section class="home-hero">
-      <img class="hero-suite-art" src="assets/hotel-suite.svg" alt="Minh họa phòng nghỉ ấm cúng tại Grand Cloud Hotel">
+      <img class="hero-suite-art" src="assets/hotel-suite.svg" alt="Minh họa phòng nghỉ ấm cúng tại GOLDEN HAVEN">
       <div class="hero-shade"></div>
       <div class="hero-copy">
-        <span class="hero-kicker"><i></i> GRAND CLOUD HOTEL &amp; RESORT</span>
+        <span class="hero-kicker"><i></i> GOLDEN HAVEN &amp; RESORT</span>
         <h1>Một chốn nghỉ<br>để <em>thảnh thơi.</em></h1>
         <p>Không gian nghỉ dưỡng ấm áp, dịch vụ tận tâm và tiện ích phòng thông minh luôn sẵn sàng cho kỳ lưu trú của bạn.</p>
         <div class="hero-actions"><a class="button-wood" href="#booking">Tìm kỳ nghỉ của bạn <span>→</span></a><a class="hero-text-link" href="khach-hang.html">Khám phá dịch vụ phòng <span>↗</span></a></div>
@@ -55,6 +55,7 @@
         <label><span>Số khách</span><select id="guests" name="guests"><option value="1">1 khách</option><option value="2" selected>2 khách</option><option value="3">3 khách</option><option value="4">4 khách</option></select></label>
         <button class="button-wood booking-submit" type="submit">Gửi yêu cầu <span>→</span></button>
       </form>
+      <p id="bookingAvailability" class="booking-note" role="status"></p>
       <p class="booking-note">Yêu cầu được gửi tới tiếp tân để xác nhận. Gửi yêu cầu chưa đồng nghĩa với đặt phòng đã được xác nhận.</p>
       <div id="bookingResult" class="booking-result" role="status" aria-live="polite" hidden></div>
     </section>
@@ -66,7 +67,7 @@
     </section>
   </main>
   <footer class="home-footer">
-    <a class="home-brand" href="/"><span>G</span><span><b>GRAND CLOUD</b><small>HOTEL &amp; RESORT</small></span></a>
+    <a class="home-brand" href="/"><span>G</span><span><b>GOLDEN HAVEN</b><small>HOTEL &amp; RESORT</small></span></a>
     <span>Chào mừng bạn đến với kỳ nghỉ thư thái.</span>
     <div style="display:flex; gap:16px;">
       <a href="khach-hang.html">Dịch vụ QR phòng ↗</a>
@@ -76,5 +77,6 @@
   <script src="assets/vendor/qrcode-generator.js"></script>
   <script src="qr.js"></script>
   <script src="home.js?v=booking-qr"></script>
+  <script src="hotel-chat.js"></script>
 </body>
 </html>

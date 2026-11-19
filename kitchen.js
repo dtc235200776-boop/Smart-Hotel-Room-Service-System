@@ -30,7 +30,7 @@ window.addEventListener('click', () => {
 
 function updateKitchenClock() {
   const clock = document.getElementById('kdsClock');
-  if (clock) clock.textContent = new Intl.DateTimeFormat('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date());
+  if (clock) clock.textContent = new Intl.DateTimeFormat('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date());
 }
 updateKitchenClock();
 setInterval(updateKitchenClock, 1000);
@@ -44,7 +44,9 @@ async function api(url, options = {}) {
 }
 
 function renderStation(station, rootId, countId) {
-  const active = orders.filter(order => order.status !== 'paid' && order.status !== 'cancelled' && order.stations?.[station]);
+  const rank = { cooking: 0, pending: 1, ready: 2 };
+  const active = orders.filter(order => order.status !== 'paid' && order.status !== 'cancelled' && order.stations?.[station])
+    .sort((first, second) => rank[first.stations[station]] - rank[second.stations[station]] || Date.parse(first.createdAt) - Date.parse(second.createdAt));
   document.getElementById(countId).textContent = `${active.length} yêu cầu`;
   document.getElementById(rootId).innerHTML = active.length ? active.map(order => {
     const status = order.stations[station];
@@ -81,7 +83,7 @@ function renderKitchen() {
   const activeOrders = orders.filter(order => order.status !== 'paid' && order.status !== 'cancelled');
   const pending = activeOrders.reduce((sum, order) => sum + stations.filter(station => order.stations?.[station === 'dining' ? 'dining' : 'housekeeping'] === 'pending').length, 0);
   const cooking = activeOrders.reduce((sum, order) => sum + stations.filter(station => order.stations?.[station] === 'cooking').length, 0);
-  const ready = activeOrders.filter(order => order.status === 'ready' || order.status === 'served').length;
+  const ready = activeOrders.reduce((sum, order) => sum + stations.filter(station => order.stations?.[station] === 'ready').length, 0);
   document.getElementById('pendingTotal').textContent = pending;
   document.getElementById('cookingTotal').textContent = cooking;
   document.getElementById('readyTotal').textContent = ready;
@@ -158,6 +160,13 @@ document.getElementById('logoutButton').addEventListener('click', async () => { 
     document.getElementById('connectionState').textContent = '● Đang đồng bộ trực tiếp';
     document.getElementById('connectionState').classList.add('connected');
     const events = new EventSource(apiUrl('/api/events'), { withCredentials: true });
+    events.onopen = () => {
+      document.getElementById('connectionState').textContent = '● Đang đồng bộ trực tiếp';
+      document.getElementById('connectionState').classList.add('connected');
+      loadOrders().catch(console.error);
+      loadTurnoverRooms();
+    };
+    events.addEventListener('folio', loadTurnoverRooms);
     events.addEventListener('order', event => {
       const order = JSON.parse(event.data); const isNew = !previousOrderIds.has(order.id);
       if (isNew) playAlert();

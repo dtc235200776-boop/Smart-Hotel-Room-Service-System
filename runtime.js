@@ -1,6 +1,6 @@
 (() => {
-  const BUILD_VERSION = '2026-11-03-guest-room-qr-realtime-1';
-  const isServer = value => value?.ok === true && value.version === BUILD_VERSION && String(value.app || '').toLowerCase().includes('cloud hotel');
+  const BUILD_VERSION = '2026-11-19-golden-haven-1';
+  const isServer = value => value?.ok === true && value.version === BUILD_VERSION && value.service === 'hotel-room-service';
   
   const showStartHint = () => {
     const add = () => {

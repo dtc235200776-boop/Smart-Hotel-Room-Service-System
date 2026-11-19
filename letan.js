@@ -1,24 +1,10 @@
 // ==========================================================================
-// Grand Cloud Hotel - Phân hệ Tiếp tân / Lễ tân & Quản lý QR Phòng
+// GOLDEN HAVEN - Phân hệ Tiếp tân / Lễ tân & Quản lý QR Phòng
 // File: letan.js
 // ==========================================================================
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const money = value => `${Number(value || 0).toLocaleString('vi-VN')}đ`;
-
-// Thông tin tài khoản ngân hàng của khách sạn nhận chuyển khoản VietQR
-const HOTEL_BANK = {
-  bankId: 'MB',
-  bankName: 'MBBank (Ngân hàng Quân Đội)',
-  accountNo: '0901234567',
-  accountName: 'GRAND CLOUD HOTEL'
-};
-
-// Hàm tạo URL mã VietQR chuẩn ngân hàng
-function getVietQrUrl(amount, memo) {
-  const cleanMemo = encodeURIComponent(String(memo || '').replace(/[^a-zA-Z0-9 ]/g, '').trim().slice(0, 50));
-  return `https://img.vietqr.io/image/${HOTEL_BANK.bankId}-${HOTEL_BANK.accountNo}-compact2.png?amount=${Math.round(amount)}&addInfo=${cleanMemo}&accountName=${encodeURIComponent(HOTEL_BANK.accountName)}`;
-}
 
 let receptionOrders = [];
 let roomsList = [];
@@ -35,7 +21,7 @@ async function loadReceptionOrders() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Không tải được hóa đơn.');
     receptionOrders = data.orders || [];
-    const unpaid = receptionOrders.filter(order => order.status !== 'paid');
+    const unpaid = receptionOrders.filter(order => !['paid', 'cancelled'].includes(order.status));
 
     target.innerHTML = unpaid.length ? unpaid.map(order => {
       const ready = ['ready', 'served'].includes(order.status);
@@ -53,7 +39,7 @@ async function loadReceptionOrders() {
           <small style="color:${ready ? '#15803d' : '#b45309'}; font-weight:600;">${state}</small>
           <footer>
             <div style="display:flex; gap:6px; width:100%;">
-              <button type="button" class="btn-vietqr" data-vietqr-order="${escapeHtml(order.id)}" style="background:#0284c7; flex:1;">Mã VietQR</button>
+              ${ready ? `<button type="button" class="btn-vietqr requires-vietqr" data-vietqr-order="${escapeHtml(order.id)}">Mã VietQR</button>` : ''}
               <button data-reception-pay="${escapeHtml(order.id)}" ${ready ? '' : 'disabled'} style="flex:1;">Xác nhận thu</button>
             </div>
           </footer>
@@ -119,9 +105,8 @@ function openCheckin(number) {
   const room = roomsList.find(r => r.number === Number(number));
   const typeText = room ? ` (${room.typeLabel || 'Tiêu chuẩn'} · ${money(room.pricePerNight)}/đêm)` : '';
   document.getElementById('checkinRoomLabel').textContent = `Phòng ${number}${typeText} · nhập thông tin lưu trú`;
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  checkinForm.elements.plannedCheckout.min = tomorrow.toISOString().slice(0, 10);
+  const tomorrow = new Date(Date.now() + 86400000);
+  checkinForm.elements.plannedCheckout.min = tomorrow.toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
   checkinForm.elements.plannedCheckout.value = checkinForm.elements.plannedCheckout.min;
   checkinBackdrop.hidden = false;
   checkinForm.elements.guestName.focus();
@@ -140,62 +125,53 @@ async function roomAction(number, action) {
 }
 
 // Mở Hóa đơn Quyết toán Tổng hợp khi Check-out
-async function openCheckoutFolio(roomNumber) {
-  const modal = document.getElementById('checkoutFolioBackdrop');
-  if (!modal) return;
-  modal.hidden = false;
-  document.getElementById('checkoutFolioDetails').innerHTML = '<p style="text-align:center; padding:20px;">Đang tính toán tiền phòng và các dịch vụ...</p>';
+function showCheckoutFolio(data) {
+  currentFolioData = data;
+  const target = document.getElementById('checkoutFolioDetails');
+  const reference = data.id ? ` · ${HotelFolio.safe(data.id)}` : '';
+  target.innerHTML = `
+    <h3>Phòng ${data.room.number}${reference}</h3>
+    ${HotelFolio.detail(data)}
+    ${data.id ? '' : `<label class="folio-method">Phương thức thanh toán
+      <select id="checkoutPaymentMethod">${HotelFolio.options()}</select>
+    </label>`}
+  `;
+  if (!data.id && data.amountDue > 0 && data.canCheckOut) {
+    const payment = document.createElement('button');
+    payment.type = 'button';
+    payment.className = 'receipt-button requires-vietqr';
+    payment.textContent = 'Mở VietQR thanh toán';
+    payment.addEventListener('click', () => openVietQrModal({
+      title: `Thanh toán phòng ${data.room.number}`, amount: data.amountDue,
+      description: `THANHTOAN PHONG ${data.room.number}`
+    }));
+    target.append(payment);
+  }
+  const confirmButton = document.getElementById('confirmSettleCheckoutBtn');
+  confirmButton.hidden = Boolean(data.checkedOutAt);
+  confirmButton.disabled = !data.canCheckOut;
+  confirmButton.textContent = data.id ? 'Xác nhận trả phòng' : 'Xác nhận đã thu & trả phòng';
+  const print = document.getElementById('printCheckoutFolioBtn');
+  print.disabled = false;
+  print.textContent = data.id ? 'In hóa đơn / Lưu PDF' : 'In phiếu tạm tính';
+}
+
+async function openCheckoutFolio(roomNumber, receiptId = '') {
+  currentFolioData = null;
+  document.getElementById('checkoutFolioBackdrop').hidden = false;
+  document.getElementById('confirmSettleCheckoutBtn').disabled = true;
+  document.getElementById('printCheckoutFolioBtn').disabled = true;
+  const target = document.getElementById('checkoutFolioDetails');
+  target.textContent = 'Đang tải phiếu quyết toán…';
 
   try {
-    const res = await fetch(`/api/rooms/${roomNumber}/bill`, { credentials: 'include', cache: 'no-store' });
+    const url = receiptId ? `/api/folios/${encodeURIComponent(receiptId)}` : `/api/rooms/${roomNumber}/bill`;
+    const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Không tải được hóa đơn phòng.');
-    currentFolioData = data;
-
-    const qrUrl = getVietQrUrl(data.amountDue, `THANHTOAN PHONG ${roomNumber}`);
-
-    document.getElementById('checkoutFolioDetails').innerHTML = `
-      <div class="folio-header" style="margin-bottom:12px; border-bottom:1px dashed #d8c7b1; padding-bottom:10px;">
-        <h3 style="margin:0 0 4px; color:#4c3828; font-size:18px;">Hóa đơn quyết toán · Phòng ${data.room.number}</h3>
-        <p style="margin:0; font-size:13px; color:#64748b;">Khách: <b>${escapeHtml(data.room.guestName)}</b> (${escapeHtml(data.room.guestPhone)}) · ${data.room.typeLabel}</p>
-        <p style="margin:2px 0 0; font-size:12px; color:#887660;">Lưu trú: ${data.room.checkIn} → ${data.room.plannedCheckout} (${data.room.nights} đêm)</p>
-      </div>
-
-      <div class="folio-breakdown" style="display:grid; gap:8px; font-size:13px;">
-        <div style="display:flex; justify-content:space-between; background:#fffcf7; padding:8px 10px; border-radius:8px; border:1px solid #eee4d7;">
-          <span>Tiền phòng (${data.room.nights} đêm × ${money(data.room.pricePerNight)})</span>
-          <b>${money(data.room.roomTotal)}</b>
-        </div>
-        <div style="display:flex; justify-content:space-between; background:#fffcf7; padding:8px 10px; border-radius:8px; border:1px solid #eee4d7;">
-          <span>Tiền dịch vụ phòng (${data.orders.length} đơn)</span>
-          <b>${money(data.servicesTotal)}</b>
-        </div>
-        ${data.servicesPaid > 0 ? `
-        <div style="display:flex; justify-content:space-between; color:#15803d; font-size:12px; padding:0 10px;">
-          <span>Đã thanh toán trước:</span>
-          <span>- ${money(data.servicesPaid)}</span>
-        </div>` : ''}
-        <div style="display:flex; justify-content:space-between; margin-top:6px; padding:10px; background:#fef3c7; border-radius:8px; font-size:16px; font-weight:800; color:#b45309;">
-          <span>TỔNG THANH TOÁN CHECK-OUT:</span>
-          <span>${money(data.amountDue)}</span>
-        </div>
-      </div>
-
-      <!-- Khung hiển thị VietQR -->
-      <div class="folio-vietqr" style="margin-top:14px; text-align:center; padding:12px; background:#f8fafc; border-radius:10px; border:1px solid #e2e8f0;">
-        <p style="margin:0 0 6px; font-size:12px; font-weight:700; color:#1e293b;">Quét mã VietQR chuyển khoản nhanh:</p>
-        <img src="${qrUrl}" alt="VietQR Thanh toán phòng" style="width:160px; height:160px; border-radius:8px; border:1px solid #cbd5e1; display:inline-block;">
-        <p style="margin:4px 0 0; font-size:11px; color:#64748b;">${HOTEL_BANK.bankName} · STK: <b>${HOTEL_BANK.accountNo}</b></p>
-      </div>
-    `;
-
-    const settleBtn = document.getElementById('confirmSettleCheckoutBtn');
-    if (settleBtn) {
-      settleBtn.disabled = !data.canCheckOut;
-      settleBtn.title = data.canCheckOut ? 'Xác nhận thu tiền và hoàn tất trả phòng' : 'Còn dịch vụ chưa hoàn tất phục vụ!';
-    }
-  } catch (err) {
-    document.getElementById('checkoutFolioDetails').innerHTML = `<p style="color:#dc2626;">${err.message}</p>`;
+    if (!res.ok) throw new Error(data.error || 'Không tải được phiếu quyết toán.');
+    showCheckoutFolio(data);
+  } catch (error) {
+    target.textContent = error.message;
   }
 }
 
@@ -208,14 +184,12 @@ async function loadRooms() {
 
     roomGrid.innerHTML = roomsList.map(room => {
       const state = roomLabels[room.status] || room.status;
-      const roomOrders = receptionOrders.filter(order => order.table === `Phòng ${room.number}`);
-      const unpaid = roomOrders.filter(order => order.status !== 'paid');
       const pinDisplay = room.pin ? `<span style="display:inline-block; margin-left:6px; padding:1px 6px; background:#fef3c7; color:#92400e; border-radius:4px; font-size:11px; font-weight:700;">PIN: ${room.pin}</span>` : '';
       
       const detail = room.status === 'occupied'
-        ? `${escapeHtml(room.guestName)} · Trả ${escapeHtml(room.plannedCheckout)}<br><small style="color:${unpaid.length ? '#b45309' : '#15803d'}">${unpaid.length ? `Còn ${unpaid.length} dịch vụ chưa thu` : 'Dịch vụ đã quyết toán'}</small>`
+        ? `${escapeHtml(room.guestName)}<br><small>Nhận thực tế: ${room.checkedInAt ? HotelFolio.time(room.checkedInAt) : HotelFolio.day(room.checkIn) + ' · chưa ghi giờ'}<br>Dự kiến trả: ${HotelFolio.day(room.plannedCheckout)}${room.receiptId ? '<br>Đã thu tiền · chờ trả phòng' : ''}</small>`
         : room.status === 'cleaning' && room.lastGuestName
-        ? `Khách vừa trả: ${escapeHtml(room.lastGuestName)}`
+        ? `Khách vừa trả: ${escapeHtml(room.lastGuestName)}<br><small>Trả thực tế: ${HotelFolio.time(room.lastCheckOut)}</small>`
         : `${room.typeLabel || 'Phòng tiêu chuẩn'} · ${money(room.pricePerNight)}/đêm`;
 
       let actions = '';
@@ -244,6 +218,9 @@ async function loadRooms() {
             <button data-room-action="maintenance_done" data-room="${room.number}">Đã sửa xong</button>
           </div>`;
       }
+      if (room.status !== 'occupied' && room.lastReceiptId) {
+        actions += `<div class="room-status-actions"><button data-receipt="${escapeHtml(room.lastReceiptId)}">Hóa đơn gần nhất</button></div>`;
+      }
 
       return `
         <article class="room-status-card ${room.status}">
@@ -264,6 +241,8 @@ async function loadRooms() {
 
 // Xử lý sự kiện trên lưới phòng
 roomGrid.addEventListener('click', async event => {
+  const receipt = event.target.closest('[data-receipt]');
+  if (receipt) return openCheckoutFolio(null, receipt.dataset.receipt);
   const checkin = event.target.closest('[data-checkin]');
   if (checkin) return openCheckin(checkin.dataset.checkin);
 
@@ -317,32 +296,31 @@ checkinForm?.addEventListener('submit', async event => {
 
 // Xử lý xác nhận quyết toán gộp và trả phòng trong Folio Modal
 document.getElementById('confirmSettleCheckoutBtn')?.addEventListener('click', async event => {
-  if (!currentFolioData) return;
-  const roomNumber = currentFolioData.room.number;
-  const button = event.target;
+  const data = currentFolioData;
+  if (!data) return;
+  const confirmation = data.id
+    ? `Xác nhận khách đã trả Phòng ${data.room.number}?`
+    : `Xác nhận đã thu ${HotelFolio.money(data.amountDue)} và khách đã trả Phòng ${data.room.number}?`;
+  if (!confirm(confirmation)) return;
+  const button = event.currentTarget;
   button.disabled = true;
-  button.textContent = 'Đang quyết toán...';
-
   try {
-    const response = await fetch(`/api/rooms/${roomNumber}`, {
-      method: 'PATCH',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'check_out', settleAll: true })
+    const response = await fetch(`/api/rooms/${data.room.number}`, {
+      method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'check_out', stayId: data.stayId, settleAll: !data.id, expectedAmount: data.amountDue,
+        paymentMethod: document.getElementById('checkoutPaymentMethod')?.value
+      })
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'Không thể trả phòng.');
-
-    document.getElementById('checkoutFolioBackdrop').hidden = true;
-    currentFolioData = null;
-    alert(`Đã hoàn tất trả phòng ${roomNumber} và quyết toán tổng cộng. Phòng được chuyển sang hàng đợi dọn dẹp.`);
+    showCheckoutFolio(result.receipt);
     await loadReceptionOrders();
     await loadRooms();
-  } catch (err) {
-    alert(err.message);
-  } finally {
-    button.disabled = false;
-    button.textContent = 'Xác nhận quyết toán gộp & Trả phòng';
+    await loadReservations();
+  } catch (error) {
+    await openCheckoutFolio(data.room.number);
+    alert(error.message);
   }
 });
 
@@ -351,47 +329,23 @@ document.getElementById('cancelCheckoutFolioBtn')?.addEventListener('click', () 
   currentFolioData = null;
 });
 
-// In phiếu tổng hợp Check-out Folio
 document.getElementById('printCheckoutFolioBtn')?.addEventListener('click', () => {
-  if (!currentFolioData) return;
-  const data = currentFolioData;
-  const receipt = document.getElementById('receiptPrint');
-  const qrUrl = getVietQrUrl(data.amountDue, `THANHTOAN PHONG ${data.room.number}`);
-
-  receipt.innerHTML = `
-    <h2>Grand Cloud Hotel &amp; Resort</h2>
-    <p><b>HÓA ĐƠN QUYẾT TOÁN CHECK-OUT (GUEST FOLIO)</b></p>
-    <p>Phòng: <b>Phòng ${data.room.number}</b> · ${data.room.typeLabel}</p>
-    <p>Khách hàng: <b>${escapeHtml(data.room.guestName)}</b> · SĐT: ${escapeHtml(data.room.guestPhone)}</p>
-    <p>Thời gian: ${data.room.checkIn} → ${data.room.plannedCheckout} (${data.room.nights} đêm)</p>
-    <hr>
-    <p>1. Tiền phòng (${data.room.nights} đêm × ${money(data.room.pricePerNight)}): <b>${money(data.room.roomTotal)}</b></p>
-    <p>2. Tiền dịch vụ phòng (${data.orders.length} lượt yêu cầu): <b>${money(data.servicesTotal)}</b></p>
-    ${data.orders.map(o => `<small style="display:block; padding-left:14px;">· #${o.id}: ${money(o.totalPrice)} (${o.items.map(i => i.name).join(', ')})</small>`).join('')}
-    <hr>
-    <p style="font-size:16px; font-weight:800;">TỔNG THANH TOÁN: ${money(data.amountDue)}</p>
-    <div style="text-align:center; margin:16px 0;">
-      <p style="font-size:12px; font-weight:700;">VietQR thanh toán trực tiếp:</p>
-      <img src="${qrUrl}" alt="VietQR" style="width:170px; height:170px; border:1px solid #ccc; border-radius:8px;">
-      <p style="font-size:11px; color:#555;">${HOTEL_BANK.bankName} · STK: ${HOTEL_BANK.accountNo}</p>
-    </div>
-    <p style="text-align:center; margin-top:12px;">Cảm ơn quý khách và hẹn gặp lại tại Grand Cloud Hotel!</p>
-  `;
-  window.print();
+  if (currentFolioData) HotelFolio.print(currentFolioData);
 });
 
 // ==========================================================================
 // 3. Modal VietQR riêng biệt
 // ==========================================================================
-function openVietQrModal({ title, amount, description }) {
+async function openVietQrModal({ title, amount, description }) {
   const modal = document.getElementById('vietqrBackdrop');
   if (!modal) return;
-  const qrUrl = getVietQrUrl(amount, description);
+  const qr = await HotelPayment.getQr(amount, description);
+  if (!qr) return;
   document.getElementById('vietqrTitle').textContent = title;
-  document.getElementById('vietqrImage').src = qrUrl;
+  document.getElementById('vietqrImage').src = qr.url;
   document.getElementById('vietqrAmountText').textContent = money(amount);
-  document.getElementById('vietqrBankText').textContent = `${HOTEL_BANK.bankName} · STK: ${HOTEL_BANK.accountNo}`;
-  document.getElementById('vietqrMemoText').textContent = `Nội dung: ${description}`;
+  document.getElementById('vietqrBankText').textContent = qr.bankLabel;
+  document.getElementById('vietqrMemoText').textContent = `Nội dung: ${qr.memo}`;
   modal.hidden = false;
 }
 
@@ -476,7 +430,7 @@ function renderQRCodes() {
     const card = document.createElement('div');
     card.className = 'table-qr-card';
     card.innerHTML = `
-      <div class="table-subtitle">Grand Cloud Hotel</div>
+      <div class="table-subtitle">GOLDEN HAVEN</div>
       <div class="table-title">PHÒNG ${roomNum}</div>
       ${pin ? `<div style="background:#fef3c7; color:#92400e; font-weight:800; font-size:12px; padding:3px 8px; border-radius:6px; margin-bottom:8px;">PIN: ${pin}</div>` : ''}
       <a href="${safeOrderUrl}" target="_blank" rel="noopener">
@@ -537,13 +491,12 @@ let bookingCameraStream = null;
 let bookingScannerTimer = null;
 
 function parseBookingId(rawValue) {
-  const value = String(rawValue || '').trim();
+  let value = String(rawValue || '').trim();
   try {
     const url = new URL(value);
-    return url.searchParams.get('booking') || value.match(/BK-\d{4}-\d+/i)?.[0] || '';
-  } catch (_) {
-    return value.match(/BK-\d{4}-\d+/i)?.[0] || '';
-  }
+    value = url.searchParams.get('booking') || '';
+  } catch (_) {}
+  return value.match(/\bBK-\d{4,}-[A-Z0-9]+\b/i)?.[0].toUpperCase() || '';
 }
 
 async function lookupBooking(rawValue = bookingIdInput?.value) {
@@ -565,20 +518,19 @@ async function lookupBooking(rawValue = bookingIdInput?.value) {
     const roomsResponse = await fetch('/api/rooms', { credentials: 'include', cache: 'no-store' });
     const roomsData = await roomsResponse.json();
     if (!roomsResponse.ok) throw new Error(roomsData.error || 'Không tải được danh sách phòng.');
-    const available = roomsData.rooms.filter(room => room.status === 'available');
-    if (!available.length) throw new Error('Hiện không có phòng trống để gán.');
+    const available = roomsData.rooms.filter(room => room.status === 'available' && (!reservation.roomType || room.type === reservation.roomType));
+    if (!available.length) throw new Error('Chưa có phòng trống đúng loại khách đã đặt.');
 
     selectedBookingId = reservation.id;
     document.getElementById('bookingConfirmDetails').innerHTML = `
       <strong>${escapeHtml(reservation.guestName)} · ${escapeHtml(reservation.phone)}</strong>
       <span>${escapeHtml(reservation.email || 'Không có email')}</span>
       <span>${escapeHtml(reservation.roomTypeLabel || reservation.roomType || 'Chưa chọn loại phòng')} · ${reservation.guests || 1} khách</span>
-      <span>${escapeHtml(reservation.checkIn)} → ${escapeHtml(reservation.checkOut)} · Booking ${escapeHtml(reservation.id)}</span>
+      <span>Đặt lúc: ${HotelFolio.time(reservation.createdAt)}</span>
+      <span>Dự kiến: ${HotelFolio.day(reservation.checkIn)} → ${HotelFolio.day(reservation.checkOut)} · ${escapeHtml(reservation.id)}</span>
       <span>Trạng thái: ${String(reservation.status).toUpperCase()}</span>
     `;
-    document.getElementById('bookingRoomSelect').innerHTML = `${available.map(room => `<option value="${room.number}">Phòng ${room.number} · ${room.typeLabel || 'Tiêu chuẩn'} · Trống</option>`).join('')}<option value="custom">Nhập số phòng khác…</option>`;
-    document.getElementById('customRoomWrap').hidden = true;
-    document.getElementById('customRoomNumber').value = '';
+    document.getElementById('bookingRoomSelect').innerHTML = available.map(room => `<option value="${room.number}">Phòng ${room.number} · ${escapeHtml(room.typeLabel || 'Tiêu chuẩn')} · Trống</option>`).join('');
     bookingConfirmBackdrop.hidden = false;
     bookingScanStatus.textContent = 'Đã tìm thấy booking. Kiểm tra thông tin khách và xác nhận phòng.';
     document.getElementById('bookingRoomSelect').focus();
@@ -593,10 +545,6 @@ bookingIdInput?.addEventListener('keydown', event => {
     event.preventDefault();
     lookupBooking();
   }
-});
-document.getElementById('bookingRoomSelect')?.addEventListener('change', event => {
-  document.getElementById('customRoomWrap').hidden = event.target.value !== 'custom';
-  if (event.target.value === 'custom') document.getElementById('customRoomNumber').focus();
 });
 document.getElementById('cancelBookingCheckin')?.addEventListener('click', () => {
   bookingConfirmBackdrop.hidden = true;
@@ -615,10 +563,8 @@ bookingCheckinForm?.addEventListener('submit', async event => {
   const button = bookingCheckinForm.querySelector('[type="submit"]');
   button.disabled = true;
   try {
-    const roomNumber = bookingCheckinForm.elements.roomNumber.value === 'custom'
-      ? document.getElementById('customRoomNumber').value
-      : bookingCheckinForm.elements.roomNumber.value;
-    if (!roomNumber) throw new Error('Hãy nhập số phòng thực tế.');
+    const roomNumber = bookingCheckinForm.elements.roomNumber.value;
+    if (!roomNumber) throw new Error('Hãy chọn một phòng còn trống.');
 
     const response = await fetch(`/api/reservations/${encodeURIComponent(selectedBookingId)}/check-in`, {
       method: 'POST',
@@ -716,7 +662,9 @@ async function loadReservations() {
         <div>
           <strong>${escapeHtml(row.guestName)} · ${escapeHtml(row.phone)}</strong>
           <small>${escapeHtml(row.email || 'Chưa có email')} · ${escapeHtml(row.roomTypeLabel || row.roomType || 'Chưa chọn loại phòng')}</small>
-          <small>${escapeHtml(row.checkIn)} → ${escapeHtml(row.checkOut)} · ${row.guests} khách · ${escapeHtml(row.id)}</small>
+          <small>Đặt lúc: ${HotelFolio.time(row.createdAt)} · ${escapeHtml(row.id)}</small>
+          <small>Dự kiến: ${HotelFolio.day(row.checkIn)} → ${HotelFolio.day(row.checkOut)} · ${row.guests} khách</small>
+          <small>Nhận thực tế: ${HotelFolio.time(row.checkedInAt)} · Trả thực tế: ${HotelFolio.time(row.checkedOutAt)}${row.roomNumber ? ` · Phòng ${row.roomNumber}` : ''}</small>
           <small>Trạng thái: <b>${statuses[String(row.status).toLowerCase()] || escapeHtml(row.status)}</b></small>
         </div>
         ${['pending', 'confirmed'].includes(String(row.status).toLowerCase()) ? `
@@ -725,7 +673,7 @@ async function loadReservations() {
               <button data-reservation="${escapeHtml(row.id)}" data-status="confirmed">Xác nhận</button>
               <button data-reservation="${escapeHtml(row.id)}" data-status="rejected">Từ chối</button>` : ''}
             <button data-checkin-booking="${escapeHtml(row.id)}">Check-in</button>
-          </div>` : ''}
+          </div>` : row.receiptId ? `<div class="reservation-actions"><button type="button" data-receipt="${escapeHtml(row.receiptId)}">Xem hóa đơn</button></div>` : ''}
       </article>`).join('') : 'Chưa có yêu cầu đặt phòng mới.';
   } catch (error) {
     target.textContent = error.message;
@@ -733,6 +681,8 @@ async function loadReservations() {
 }
 
 document.getElementById('reservationList')?.addEventListener('click', async event => {
+  const receipt = event.target.closest('[data-receipt]');
+  if (receipt) return openCheckoutFolio(null, receipt.dataset.receipt);
   const checkin = event.target.closest('[data-checkin-booking]');
   if (checkin) {
     document.getElementById('bookingIdInput').value = checkin.dataset.checkinBooking;
@@ -791,6 +741,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   setInterval(async () => {
     await loadReceptionOrders();
     await loadRooms();
+    await loadReservations();
   }, 12000);
 
   const room = new URLSearchParams(location.search).get('room');

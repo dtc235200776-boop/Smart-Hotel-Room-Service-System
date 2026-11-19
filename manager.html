@@ -4,7 +4,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Quản lý khách sạn · Grand Cloud Hotel</title>
+  <title>Quản lý khách sạn · GOLDEN HAVEN</title>
   <link rel="stylesheet" href="style.css">
   <style>
     .cancel-button {
@@ -34,7 +34,7 @@
     <div class="admin-brand">
       <div class="kds-mark">GH</div>
       <div>
-        <p class="eyebrow">GRAND HOTEL · MANAGER DASHBOARD</p>
+        <p class="eyebrow">GOLDEN HAVEN · MANAGER DASHBOARD</p>
         <h1>Quản lý toàn khách sạn</h1>
         <span id="cashierConnection" class="connection-state">Đang kết nối hệ thống khách sạn…</span>
       </div>
@@ -51,7 +51,7 @@
   <main class="admin-main">
     <section class="admin-stats cashier-stats">
       <article>
-        <span>Doanh thu dịch vụ hôm nay</span>
+        <span>Doanh thu phòng và dịch vụ hôm nay</span>
         <strong id="revenueStat">0đ</strong>
         <small id="revenueOrderCount">0 lượt yêu cầu</small>
       </article>
@@ -114,6 +114,7 @@
         <div class="bill-tabs">
           <button class="active" data-bill-view="unpaid">Chờ quyết toán</button>
           <button data-bill-view="paid">Đã quyết toán</button>
+          <button data-bill-view="cancelled">Đã hủy</button>
         </div>
       </div>
       <div id="billsList" class="bills-list"></div>
@@ -123,12 +124,12 @@
       <div class="section-heading">
         <div>
           <p class="eyebrow">BÁO CÁO DOANH THU</p>
-          <h2>Doanh thu dịch vụ 7 ngày &amp; Dịch vụ phổ biến</h2>
+          <h2>Doanh thu 7 ngày &amp; Dịch vụ phổ biến</h2>
         </div>
       </div>
       <div class="report-grid">
         <article class="report-card">
-          <h3>Doanh thu dịch vụ phòng đã quyết toán</h3>
+          <h3>Tiền phòng và dịch vụ đã thu</h3>
           <div id="revenueChart" class="bar-chart"></div>
         </article>
         <article class="report-card">
@@ -150,8 +151,7 @@
   <div id="cashierVietqrModal" class="guest-qr-backdrop" hidden>
     <section class="guest-qr-dialog" role="dialog" aria-modal="true" style="max-width: 440px;">
       <h2 id="cashierVietqrTitle">Mã VietQR chuyển khoản</h2>
-      <p id="cashierVietqrBank" style="margin-bottom: 4px; font-weight:700; color:#1e293b;">MBBank · STK: 0901234567 ·
-        GRAND CLOUD HOTEL</p>
+      <p id="cashierVietqrBank"></p>
       <p id="cashierVietqrMemo" style="margin-bottom: 12px; font-size:12px; color:#64748b;"></p>
       <img id="cashierVietqrImg" alt="VietQR Thanh toán">
       <div style="margin: 12px 0 6px;">
@@ -165,6 +165,7 @@
   </div>
 
   <section id="receiptPrint" class="receipt-print"></section>
+  <script src="payment-qr.js"></script>
   <script src="admin.js"></script>
 </body>
 

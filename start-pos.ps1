@@ -5,7 +5,8 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
 }
 
 $projectPath = $PSScriptRoot
-$buildVersion = '2026-11-03-guest-room-qr-realtime-1'
+& (Join-Path $projectPath 'start-ai.ps1') -Quiet
+$buildVersion = '2026-11-19-golden-haven-1'
 $readyPort = $null
 
 # Reuse a matching current server if it is already running.
@@ -22,7 +23,7 @@ if (-not $readyPort) {
     foreach ($port in 3010..3000) {
         try {
             $health = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/health" -TimeoutSec 1
-            if (-not $health.ok -or $health.version -eq $buildVersion -or $health.app -notlike '*Cloud Hotel*') { continue }
+            if (-not $health.ok -or $health.version -eq $buildVersion -or ($health.service -ne 'hotel-room-service' -and $health.app -notlike '*Cloud Hotel*')) { continue }
             $listener = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction Stop | Select-Object -First 1
             if (-not $listener -or -not $listener.OwningProcess) { continue }
             $owner = Get-Process -Id $listener.OwningProcess -ErrorAction Stop

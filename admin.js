@@ -1,26 +1,15 @@
 const money = value => Number(value || 0) === 0 ? '0đ' : `${Number(value || 0).toLocaleString('vi-VN')}đ`;
-const localDateKey = value => value ? new Date(value).toLocaleDateString('en-CA') : '';
+const localDateKey = value => value ? new Date(value).toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }) : '';
 const API_BASE = '';
 const apiUrl = path => `${API_BASE}${path}`;
 const safe = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
-
-const HOTEL_BANK = {
-  bankId: 'MB',
-  bankName: 'MBBank (Ngân hàng Quân Đội)',
-  accountNo: '0901234567',
-  accountName: 'GRAND CLOUD HOTEL'
-};
-
-function getVietQrUrl(amount, memo) {
-  const cleanMemo = encodeURIComponent(String(memo || '').replace(/[^a-zA-Z0-9 ]/g, '').trim().slice(0, 50));
-  return `https://img.vietqr.io/image/${HOTEL_BANK.bankId}-${HOTEL_BANK.accountNo}-compact2.png?amount=${Math.round(amount)}&addInfo=${cleanMemo}&accountName=${encodeURIComponent(HOTEL_BANK.accountName)}`;
-}
 
 let orders = [];
 let billView = 'unpaid';
 let rooms = [];
 let inventory = [];
 let reservations = [];
+let roomReceipts = [];
 
 async function api(url, options = {}) {
   const response = await fetch(apiUrl(url), { credentials: 'include', ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
@@ -33,9 +22,8 @@ async function api(url, options = {}) {
 function renderReceipt(order) {
   const receipt = document.getElementById('receiptPrint');
   const amountToPay = order.amountPaid ?? order.totalPrice;
-  const qrUrl = getVietQrUrl(amountToPay, `THANHTOAN ${order.table} ${order.id}`);
   receipt.innerHTML = `
-    <h2>Grand Cloud Hotel &amp; Resort</h2>
+    <h2>GOLDEN HAVEN &amp; Resort</h2>
     <p>${order.status === 'paid' ? 'HÓA ĐƠN QUYẾT TOÁN DỊCH VỤ PHÒNG (CHECK-OUT)' : 'PHIẾU TẠM TÍNH DỊCH VỤ PHÒNG'}</p>
     <p>${safe(order.table)} · Mã phiếu: ${safe(order.id)}</p>
     <p>Thời gian: ${new Date(order.createdAt).toLocaleString('vi-VN')}</p>
@@ -44,20 +32,16 @@ function renderReceipt(order) {
     <p>Tổng tiền dịch vụ: ${money(order.totalPrice)}</p>
     ${order.voucherDiscount ? `<p>Ưu đãi ${safe(order.voucherCode)}: -${money(order.voucherDiscount)}</p>` : ''}
     <p class="receipt-total">Thanh toán: ${money(amountToPay)}</p>
-    <div style="text-align:center; margin:14px 0;">
-      <p style="font-size:12px; font-weight:700;">VietQR chuyển khoản nhanh:</p>
-      <img src="${qrUrl}" alt="VietQR Thanh toán" style="width:150px; height:150px; border:1px solid #ccc; border-radius:6px; display:inline-block;">
-      <p style="font-size:11px; color:#555; margin-top:4px;">${HOTEL_BANK.bankName} · STK: ${HOTEL_BANK.accountNo}</p>
-    </div>
-    <p>Kính chúc quý khách có kỳ nghỉ đáng nhớ tại Grand Cloud Hotel!</p>`;
+    ${order.paidAt ? `<p>Thu tiền: ${new Date(order.paidAt).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}</p>` : ''}
+    <p>Kính chúc quý khách có kỳ nghỉ đáng nhớ tại GOLDEN HAVEN!</p>`;
   window.print();
 }
 window.printOrder = id => { const order = orders.find(item => item.id === id); if (order) renderReceipt(order); };
 
 function renderBills() {
   const view = orders.filter(order => {
-    if (order.status === 'cancelled') return billView === 'unpaid';
-    return billView === 'paid' ? order.status === 'paid' : order.status !== 'paid';
+    if (billView === 'cancelled' || billView === 'paid') return order.status === billView;
+    return !['paid', 'cancelled'].includes(order.status);
   });
   document.getElementById('billsList').innerHTML = view.length ? view.map(order => {
     const paid = order.status === 'paid';
@@ -77,8 +61,8 @@ function renderBills() {
       : isCancelled
       ? `<span style="font-size:12px; color:#94a3b8;">Không phát sinh chi phí</span>`
       : `<div class="bill-actions" style="display:flex; flex-wrap:wrap; gap:6px;">
-           <button type="button" class="cancel-button" data-cancel="${safe(order.id)}" title="Hủy bỏ yêu cầu này">Hủy</button>
-           <button type="button" class="receipt-button" style="background:#0284c7; color:#fff;" data-vietqr="${safe(order.id)}">Mã VietQR</button>
+           ${order.status === 'pending' ? `<button type="button" class="cancel-button" data-cancel="${safe(order.id)}">Hủy</button>` : ''}
+           ${waitingDepartments.length ? '' : `<button type="button" class="receipt-button requires-vietqr" data-vietqr="${safe(order.id)}">Mã VietQR</button>`}
            <button class="pay-button" data-pay="${safe(order.id)}" ${!['ready', 'served'].includes(order.status) ? `disabled title="${safe(waitingTitle || 'Chờ bộ phận phục vụ hoàn tất dịch vụ')}"` : ''}>${waitingDepartments.length ? `Chờ ${safe(waitingDepartments.join(' & '))}` : 'Xác nhận thanh toán'}</button>
            ${waitingDepartments.length ? '<a href="/bo-phan.html" style="font-size:12px; align-self:center;">Mở cổng bộ phận →</a>' : ''}
          </div>`;
@@ -104,9 +88,11 @@ function renderBills() {
 
 function renderReports(paidOrders) {
   const daily = Array.from({ length: 7 }, (_, offset) => {
-    const date = new Date(); date.setDate(date.getDate() - (6 - offset)); const key = date.toLocaleDateString('en-CA');
-    const amount = paidOrders.filter(order => localDateKey(order.paidAt) === key).reduce((sum, order) => sum + (order.amountPaid ?? order.totalPrice), 0);
-    return { label: date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }), amount };
+    const date = new Date(Date.now() - (6 - offset) * 86400000);
+    const key = localDateKey(date);
+    const amount = paidOrders.filter(order => localDateKey(order.paidAt) === key).reduce((sum, order) => sum + (order.amountPaid ?? order.totalPrice), 0)
+      + roomReceipts.filter(receipt => localDateKey(receipt.paidAt) === key).reduce((sum, receipt) => sum + receipt.room.roomTotal, 0);
+    return { label: date.toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit' }), amount };
   });
   const maximum = Math.max(...daily.map(day => day.amount), 1);
   const chart = document.getElementById('revenueChart'); if (!chart) return;
@@ -141,11 +127,15 @@ function renderManagerTasks(unpaid) {
 }
 
 function renderAdmin() {
-  const unpaid = orders.filter(order => order.status !== 'paid'); const paid = orders.filter(order => order.status === 'paid');
-  const today = new Date().toLocaleDateString('en-CA'); const todayPaid = paid.filter(order => localDateKey(order.paidAt) === today);
-  const revenue = todayPaid.reduce((sum, order) => sum + (order.amountPaid ?? order.totalPrice), 0);
+  const unpaid = orders.filter(order => !['paid', 'cancelled'].includes(order.status));
+  const paid = orders.filter(order => order.status === 'paid');
+  const today = localDateKey(new Date());
+  const todayPaid = paid.filter(order => localDateKey(order.paidAt) === today);
+  const roomRevenue = roomReceipts.filter(receipt => localDateKey(receipt.paidAt) === today).reduce((sum, receipt) => sum + receipt.room.roomTotal, 0);
+  const revenue = roomRevenue + todayPaid.reduce((sum, order) => sum + (order.amountPaid ?? order.totalPrice), 0);
   document.getElementById('revenueStat').textContent = money(revenue);
-  document.getElementById('revenueOrderCount').textContent = `${todayPaid.length} lượt phục vụ hôm nay`;
+  document.getElementById('revenueOrderCount').textContent = document.getElementById('tablesGrid')
+    ? `Tiền phòng ${money(roomRevenue)} · ${todayPaid.length} đơn dịch vụ đã thu` : `${todayPaid.length} lượt phục vụ hôm nay`;
   document.getElementById('unpaidStat').textContent = unpaid.filter(order => ['ready', 'served'].includes(order.status)).length;
   const activeTables = new Set(unpaid.map(order => order.table));
   const occupied = rooms.length ? rooms.filter(room => room.status === 'occupied').length : activeTables.size;
@@ -170,9 +160,14 @@ function renderAdmin() {
 
 async function loadOrders() {
   const requests = [api('/api/orders')];
-  if (document.getElementById('tablesGrid')) requests.push(api('/api/rooms'), api('/api/inventory'), api('/api/reservations'));
+  if (document.getElementById('tablesGrid')) requests.push(api('/api/rooms'), api('/api/inventory'), api('/api/reservations'), api('/api/folios'));
   const results = await Promise.all(requests); orders = results[0].orders;
-  if (results.length > 1) { rooms = results[1].rooms; inventory = results[2].items; reservations = results[3].reservations; }
+  if (results.length > 1) {
+    rooms = results[1].rooms;
+    inventory = results[2].items;
+    reservations = results[3].reservations;
+    roomReceipts = results[4].receipts;
+  }
   renderAdmin();
 }
 document.getElementById('billsList').addEventListener('click', async event => {
@@ -183,11 +178,15 @@ document.getElementById('billsList').addEventListener('click', async event => {
     if (!order) return;
     const modal = document.getElementById('cashierVietqrModal');
     if (!modal) return;
-    const qrUrl = getVietQrUrl(order.totalPrice, `THANHTOAN ${order.table} ${order.id}`);
+    const code = document.querySelector(`[data-voucher-for="${CSS.escape(id)}"]`)?.value.trim();
+    if (code) return alert('Nếu dùng ưu đãi, hãy đối chiếu số tiền sau ưu đãi và thu tại quầy.');
+    const qr = await HotelPayment.getQr(order.totalPrice, `THANHTOAN ${order.table} ${order.id}`);
+    if (!qr) return;
     document.getElementById('cashierVietqrTitle').textContent = `VietQR · ${order.table} (#${order.id})`;
-    document.getElementById('cashierVietqrImg').src = qrUrl;
+    document.getElementById('cashierVietqrImg').src = qr.url;
+    document.getElementById('cashierVietqrBank').textContent = qr.bankLabel;
     document.getElementById('cashierVietqrAmount').textContent = money(order.totalPrice);
-    document.getElementById('cashierVietqrMemo').textContent = `Nội dung CK: THANHTOAN ${order.table.replace(/\s+/g, '')} ${order.id.slice(-6)}`;
+    document.getElementById('cashierVietqrMemo').textContent = `Nội dung: ${qr.memo}`;
     modal.hidden = false;
     return;
   }
@@ -210,7 +209,11 @@ document.getElementById('billsList').addEventListener('click', async event => {
   const print = event.target.closest('[data-print]'); if (print) return window.printOrder(print.dataset.print);
   const button = event.target.closest('[data-pay]'); if (!button) return;
   const id = button.dataset.pay; const input = document.querySelector(`[data-voucher-for="${CSS.escape(id)}"]`); button.disabled = true;
-  try { await api(`/api/orders/${encodeURIComponent(id)}/pay`, { method: 'POST', body: JSON.stringify({ voucherCode: input?.value || '' }) }); await loadOrders(); }
+  try {
+    await api(`/api/orders/${encodeURIComponent(id)}/pay`, { method: 'POST', body: JSON.stringify({ voucherCode: input?.value || '' }) });
+    document.querySelector('[data-bill-view="paid"]')?.click();
+    await loadOrders();
+  }
   catch (error) { alert(error.message); button.disabled = false; }
 });
 document.getElementById('closeCashierVietqrBtn')?.addEventListener('click', () => {
@@ -237,7 +240,29 @@ document.getElementById('cashierLogout').addEventListener('click', async () => {
 (async () => {
   try {
     await loadOrders(); document.getElementById('cashierConnection').textContent = '● Đang đồng bộ trực tiếp'; document.getElementById('cashierConnection').classList.add('connected');
-    const events = new EventSource(apiUrl('/api/events'), { withCredentials: true }); events.addEventListener('order', event => { const order = JSON.parse(event.data); const index = orders.findIndex(item => item.id === order.id); if (index < 0) orders.unshift(order); else orders[index] = order; renderAdmin(); });
+    const events = new EventSource(apiUrl('/api/events'), { withCredentials: true });
+    events.addEventListener('order', event => {
+      const order = JSON.parse(event.data);
+      const index = orders.findIndex(item => item.id === order.id);
+      if (index < 0) orders.unshift(order); else orders[index] = order;
+      renderAdmin();
+      window.dispatchEvent(new Event('hotel-billing-updated'));
+      if (document.getElementById('tablesGrid')) api('/api/inventory').then(data => {
+        inventory = data.items;
+        renderInventory();
+        renderManagerTasks(orders.filter(order => !['paid', 'cancelled'].includes(order.status)));
+      }).catch(console.error);
+    });
+    events.addEventListener('folio', () => {
+      window.dispatchEvent(new Event('hotel-billing-updated'));
+      if (document.getElementById('tablesGrid')) loadOrders().catch(console.error);
+    });
+    events.onopen = () => {
+      document.getElementById('cashierConnection').textContent = '● Đang đồng bộ trực tiếp';
+      document.getElementById('cashierConnection').classList.add('connected');
+      loadOrders().catch(console.error);
+      window.dispatchEvent(new Event('hotel-billing-updated'));
+    };
     events.onerror = () => { document.getElementById('cashierConnection').textContent = 'Đang khôi phục kết nối…'; document.getElementById('cashierConnection').classList.remove('connected'); };
   } catch (error) { document.getElementById('cashierConnection').textContent = error.message; }
 })();

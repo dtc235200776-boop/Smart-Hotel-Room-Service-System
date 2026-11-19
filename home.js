@@ -3,24 +3,51 @@ const resultBox = document.getElementById('bookingResult');
 const checkIn = document.getElementById('checkIn');
 const checkOut = document.getElementById('checkOut');
 const staffPortalReturn = document.getElementById('staffPortalReturn');
+const bookingDateTime = new Intl.DateTimeFormat('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', dateStyle: 'short', timeStyle: 'medium' });
+const bookingDay = value => String(value || '').split('-').reverse().join('/');
+const bookingTime = value => value && Number.isFinite(Date.parse(value)) ? bookingDateTime.format(new Date(value)) : 'Chưa ghi nhận';
 fetch('/api/session', { credentials: 'include', cache: 'no-store' })
   .then(response => response.ok ? response.json() : { staff: false })
   .then(session => { if (staffPortalReturn) staffPortalReturn.hidden = !session.staff; })
   .catch(() => { if (staffPortalReturn) staffPortalReturn.hidden = true; });
 const localDate = offset => {
-  const date = new Date(); date.setDate(date.getDate() + offset);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  return new Date(Date.now() + offset * 86400000).toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
 };
 checkIn.min = localDate(0);
 checkOut.min = localDate(1);
 checkIn.value = localDate(0);
 checkOut.value = localDate(1);
+const availabilityNote = document.getElementById('bookingAvailability');
+let availabilityRequest;
+async function updateAvailability() {
+  availabilityRequest?.abort();
+  if (!checkIn.validity.valid || !checkOut.validity.valid || checkOut.value <= checkIn.value) {
+    availabilityNote.textContent = '';
+    return;
+  }
+  availabilityRequest = new AbortController();
+  const params = new URLSearchParams({ roomType: form.elements.roomType.value, checkIn: checkIn.value, checkOut: checkOut.value });
+  try {
+    const res = await fetch(`/api/availability?${params}`, { signal: availabilityRequest.signal });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+    availabilityNote.textContent = data.available
+      ? `Còn ${data.available} phòng đúng loại trong khoảng ngày đã chọn.`
+      : 'Loại phòng này đã hết trong khoảng ngày đã chọn. Bạn có thể chọn loại phòng hoặc ngày khác.';
+  } catch (error) {
+    if (error.name !== 'AbortError') availabilityNote.textContent = 'Chưa kiểm tra được phòng trống. Có thể thử lại khi gửi yêu cầu.';
+  }
+}
 checkIn.addEventListener('change', () => {
   const nextDay = new Date(`${checkIn.value}T00:00:00`); nextDay.setDate(nextDay.getDate() + 1);
   const minimum = `${nextDay.getFullYear()}-${String(nextDay.getMonth() + 1).padStart(2, '0')}-${String(nextDay.getDate()).padStart(2, '0')}`;
   checkOut.min = minimum;
   if (checkOut.value < minimum) checkOut.value = minimum;
+  updateAvailability();
 });
+checkOut.addEventListener('change', updateAvailability);
+form.elements.roomType.addEventListener('change', updateAvailability);
+updateAvailability();
 form.addEventListener('submit', async event => {
   event.preventDefault();
   const button = form.querySelector('button[type="submit"]');
@@ -39,6 +66,7 @@ form.addEventListener('submit', async event => {
     resultBox.textContent = error.message;
   } finally {
     button.disabled = false; button.innerHTML = 'Gửi yêu cầu <span>→</span>';
+    updateAvailability();
   }
 });
 
@@ -65,7 +93,12 @@ async function showBookingResult(reservation, wasSubmitted = false) {
     <div>
       <strong>${wasSubmitted ? 'Đã nhận yêu cầu' : 'Mã đặt phòng'} ${id}</strong>
       <p>Trạng thái: <b>${status}</b></p>
-      <p>${escapeBookingText(reservation.roomTypeLabel || reservation.roomType)} · ${escapeBookingText(reservation.checkIn)} – ${escapeBookingText(reservation.checkOut)}</p>
+      <p>${escapeBookingText(reservation.roomTypeLabel || reservation.roomType)} · Dự kiến ${escapeBookingText(bookingDay(reservation.checkIn))} – ${escapeBookingText(bookingDay(reservation.checkOut))}</p>
+      <div class="booking-time-list">
+        <p>Đặt lúc: ${bookingTime(reservation.createdAt)}</p>
+        <p>Nhận thực tế: ${bookingTime(reservation.checkedInAt)}</p>
+        <p>Trả thực tế: ${bookingTime(reservation.checkedOutAt)}</p>
+      </div>
       ${confirmation}
       <p>Dùng mã này để xem trạng thái đặt phòng hoặc đưa lễ tân khi nhận phòng. QR để gọi dịch vụ sẽ được cấp sau khi nhận phòng.</p>
       <p id="bookingQrNetworkNote"></p>
