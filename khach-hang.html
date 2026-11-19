@@ -38,6 +38,10 @@
       <p>Quý khách vui lòng quét mã QR đặt tại bàn trong phòng để gọi dịch vụ.</p>
     </div>
   </div>
+  <details class="guest-room-profile" id="guestRoomProfile" hidden>
+    <summary id="guestRoomProfileTitle"></summary>
+    <div id="guestRoomProfileDetails" class="guest-room-profile-details"></div>
+  </details>
   <div class="table-entry-guide" id="tableEntryGuide">
     <div>
       <strong>Để phục vụ đúng phòng, hãy quét mã QR đặt tại bàn phòng lưu trú.</strong>
@@ -151,7 +155,8 @@
 
   <section id="receiptPrint" class="receipt-print"></section>
 
-  <script src="app.js?v=menu-photos"></script>
+  <script src="room-profile.js"></script>
+  <script src="app.js?v=room-profile"></script>
   <script src="hotel-chat.js"></script>
 </body>
 </html>

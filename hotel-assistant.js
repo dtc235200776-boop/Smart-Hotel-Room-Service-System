@@ -1,9 +1,7 @@
 const normalize = text => text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  .replace(/đ/g, 'd').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  .replace(/đ/g, 'd').replace(/[^a-z0-9 ]/g, ' ').replace(/\b(ko|khongg|hong|kh)\b/g, 'khong').replace(/\s+/g, ' ').trim();
 const { hotelDay } = require('./hotel-folio');
 const money = amount => amount ? `${amount.toLocaleString('vi-VN')} đ` : 'Miễn phí';
-const words = text => new Set(normalize(text).split(' ').filter(word => word.length >= 2));
-const stopWords = new Set('toi muon ban minh anh chi cho xin hoi co gia nao bao nhieu vai voi trong cac duoc khong the nhu thi ve tai phong dich vu'.split(' '));
 const followUp = /^(con |vay |the |loai do|mon do|cai do|no |bao nhieu|may tien|gia sao|gia the nao|tu ngay|tu \d|ngay mai)|\b(bao nhieu mot dem|o \d+ dem)\b/;
 
 let activeModelRequests = 0;
@@ -46,38 +44,67 @@ async function classifyQuestion(question, history) {
   }
 }
 
-async function chatWithHotel(question, history, menu, roomTypes, checkAvailability) {
-  const previous = Array.isArray(history) ? history.filter(q => typeof q === 'string').slice(-4).map(q => q.slice(0, 300)) : [];
-  const original = normalize(question);
-  // The model may label an intent, but dates, quantities and room names only come from the guest.
-  const context = (previous.at(-1) || '').split(' · ')[0];
-  const intent = await classifyQuestion(question, previous);
-  const explicitTopic = /\b(thanh toan|hoa don|tra phong|nhan phong|don phong|quet qr|ma pin|wifi|den san bay)\b/.test(original);
-  const explicitRoom = roomTypes.some(room => original.includes(normalize(room.typeLabel).replace('phong ', '')));
-  const explicitMenu = menu.some(item => {
-    const title = [...words(item.name)].filter(word => !stopWords.has(word));
-    const query = words(original);
-    return title.filter(word => query.has(word)).length >= 2;
-  });
-  const isFollowUp = Boolean(context) && followUp.test(original) && !explicitTopic && !explicitRoom && !explicitMenu;
-  const lookup = isFollowUp ? `${question} · ${context}` : question;
-  let answer = answerHotelQuestion(lookup, menu, roomTypes, checkAvailability);
-  const hotelCue = /\b(khach san|phong|luu tru|ky nghi|le tan|dich vu|an uong|mon|hoa don|nhan|tra|thue|dem|gia|dat)\b/;
-  if (answer.unknown && intentQueries[intent] && hotelCue.test(normalize(lookup))) {
-    answer = answerHotelQuestion(`${lookup} ${intentQueries[intent]}`, menu, roomTypes, checkAvailability);
-  }
-  const remembered = isFollowUp ? `${context} · ${question}` : question;
-  return { text: answer.text, action: answer.action, context: remembered, mode: intent ? 'model' : 'lookup' };
+const roomAliases = {
+  standard: ['tieu chuan', 'standard', 'phong thuong'],
+  deluxe: ['deluxe'],
+  suite: ['suite']
+};
+const serviceAliases = {
+  1: ['don phong', 'doi ga', 'thay ga', 've sinh phong'],
+  2: ['khan tam', 'bo ve sinh', 'them khan'],
+  3: ['ban ui', 'cau la'],
+  4: ['may say toc', 'o cam', 'adapter'],
+  5: ['giat ui', 'giat say', 'giat quan ao'],
+  6: ['giat hap', 'giat vest'],
+  7: ['thue xe may', 'xe tay ga'],
+  8: ['dua don san bay', 'xe san bay'],
+  9: ['an sang', 'continental', 'diem tam'],
+  10: ['pho', 'pho bo'],
+  11: ['bit tet', 'steak'],
+  12: ['mi y', 'spaghetti'],
+  13: ['sandwich'],
+  14: ['trai cay', 'hoa qua'],
+  15: ['ca phe', 'robusta', 'cafe'],
+  16: ['tra lai', 'tra mat ong', 'tra chanh'],
+  17: ['ruou vang', 'vang do'],
+  18: ['nuoc ngot', 'coca', '7up'],
+  19: ['bia', 'heineken'],
+  20: ['nuoc khoang', 'nuoc minibar'],
+  21: ['them nuoc', 'bo sung nuoc', 'nuoc uong'],
+  22: ['ho tro tai phong', 'goi nhan vien']
+};
+const hotelCue = /\b(khach san|phong|luu tru|ky nghi|le tan|dich vu|an uong|mon|hoa don|giat|do dung|dem|dat|giao tan noi)\b/;
+const presence = /^(xin chao|chao|hello|hi|alo|bot oi|tro ly oi|co ai khong|co o day khong)( ban| a| nhe| nhi)?$|\b(tro ly|ban) (co )?((o )?day|dang nghe|online)( khong)?( a| nhi| vay)?$/;
+const continuation = /^(gioi thieu (tiep|them)|ke them|noi tiep|tiep theo|tiep tuc|con gi nua|cho minh biet them)( di| nua| voi| nhe| a| nha)*$/;
+const isPrice = /\b(gia|bao nhieu tien|may tien|tien phong|het bao nhieu|bao nhieu mot dem)\b/;
+const isAvailable = /\b(con phong|phong trong|co phong|kha dung|con .* khong|kiem tra lich)\b/;
+const introSteps = ['rooms', 'services', 'booking', 'payment'];
+const genericSuggestions = ['So sánh 3 hạng phòng', 'Cho mình xem thực đơn', 'Đặt phòng thế nào?'];
+
+const guides = {
+  booking: { text: 'Chọn hạng phòng, ngày nhận và ngày trả. Điền số khách và thông tin liên hệ rồi bấm Gửi yêu cầu. Bạn sẽ nhận mã BK và QR để tra cứu. Lễ tân sẽ xác nhận yêu cầu.', action: 'booking', suggestions: ['Còn phòng Deluxe không?', 'Nhận phòng thế nào?'] },
+  lookup: { text: 'Mở liên kết trong QR đặt phòng để xem trạng thái, hoặc đưa mã BK cho lễ tân. Lễ tân có thể dùng mã này để tìm và xác nhận yêu cầu.', action: 'booking', suggestions: ['Nhận phòng thế nào?', 'Dùng QR trong phòng thế nào?'] },
+  arrival: { text: 'Khi đến, đưa mã BK hoặc QR đặt phòng cho lễ tân. Lễ tân chọn phòng trống đúng hạng và cấp QR dịch vụ cùng PIN. Nếu cần giờ nhận phòng cụ thể, hãy kiểm tra với lễ tân.', action: 'booking', suggestions: ['Dùng QR trong phòng thế nào?', 'Trả phòng thế nào?'] },
+  services: { text: 'Sau khi nhận phòng, quét QR dịch vụ để chọn món ăn hoặc tiện ích như dọn phòng, thêm khăn và giặt ủi. Bấm Xem yêu cầu rồi gửi. Bạn có thể theo dõi trạng thái phục vụ ngay trên trang.', action: 'services', suggestions: ['Cho mình xem thực đơn', 'Giặt ủi bao nhiêu?', 'Thanh toán ở đâu?'] },
+  food: { text: 'Bạn có thể chọn điểm tâm, món chính, trái cây hoặc đồ uống ngay tại phòng. Hỏi tên một món để xem giá và tình trạng phục vụ.', action: 'dining', suggestions: ['Phở bò bao nhiêu tiền?', 'Cà phê giá bao nhiêu?'] },
+  housekeeping: { text: 'Buồng phòng nhận yêu cầu dọn phòng, thêm khăn hoặc nước, mượn đồ và giặt ủi. Quét QR phòng để chọn dịch vụ cần dùng.', action: 'housekeeping', suggestions: ['Thêm khăn tắm có mất phí?', 'Giặt ủi bao nhiêu?'] },
+  payment: { text: 'Khi trả phòng, lễ tân hoặc thu ngân đối chiếu tiền phòng, dịch vụ và khoản đã thu trước. Sau khi nhận tiền, nhân viên in hóa đơn hoặc lưu PDF. Nếu thanh toán dịch vụ trước, khoản đó sẽ được ghi vào phiếu phòng.', action: '', suggestions: ['Trả phòng thế nào?', 'Cách liên hệ lễ tân'] },
+  checkout: { text: 'Mang thẻ phòng đến quầy lễ tân. Nhân viên kiểm tra các dịch vụ đã dùng, xác nhận đã thanh toán, giao hóa đơn và hoàn tất trả phòng. Bạn có thể hỏi lễ tân về giờ trả phòng của lượt lưu trú.', action: '', suggestions: ['Thanh toán ở đâu?', 'Cách liên hệ lễ tân'] },
+  contact: { text: 'Trong phòng, gọi số máy nhánh 0 hoặc chọn Yêu cầu hỗ trợ tại phòng trên QR dịch vụ. Lễ tân sẽ kiểm tra các yêu cầu riêng, thông tin Wi-Fi và chính sách lưu trú.', action: 'housekeeping', suggestions: ['Dùng QR trong phòng thế nào?'] },
+  allergy: { text: 'Vui lòng báo lễ tân qua máy nhánh 0 và ghi chú cho bếp. Nhân viên cần xác nhận nguyên liệu cụ thể trước khi bạn đặt món.', action: 'dining', suggestions: ['Cho mình xem thực đơn', 'Cách liên hệ lễ tân'] }
+};
+
+function findRoomTypes(text, roomTypes) {
+  const token = ` ${text} `;
+  return roomTypes.filter(room => (roomAliases[room.type] || []).some(alias => token.includes(` ${alias} `)));
 }
 
-const topics = [
-  [/ma bk|ma dat|tra cuu|tinh trang dat/, 'Bạn có thể mở QR đặt phòng hoặc đưa mã BK cho lễ tân để tra cứu. Yêu cầu mới ở trạng thái chờ xác nhận. Nếu đã mở trang tra cứu, tải lại trang để xem trạng thái mới nhất.', 'booking'],
-  [/nhan phong|check in|checkin|tra phong|check out|checkout/, 'Khi đến, đưa mã BK cho lễ tân để xác nhận và nhận phòng. Khi trả phòng, mang thẻ phòng đến lễ tân để đối chiếu tiền phòng và dịch vụ. Lễ tân xác nhận giờ cụ thể theo đặt phòng của bạn.', 'booking'],
-  [/hoa don|thanh toan|tra tien|tien mat|chuyen khoan|vietqr/, 'Bạn có thể thanh toán dịch vụ tại quầy hoặc gộp cùng tiền phòng khi trả phòng. Sau khi xác nhận đã thu tiền, thu ngân hoặc lễ tân có thể in hóa đơn lưu trú hoặc lưu thành PDF. Hãy dùng thông tin thanh toán do nhân viên cung cấp.', ''],
-  [/quet|ma qr|goi dich vu|gui yeu cau|theo doi|ma pin/, 'Sau khi nhận phòng, quét QR dịch vụ do lễ tân cấp. Chọn món hoặc tiện ích, bấm Xem yêu cầu rồi gửi. Bạn có thể theo dõi trạng thái trên cùng trang. Nếu được hỏi PIN, dùng mã PIN lễ tân đã cung cấp.', 'services'],
-  [/dat phong|con phong|phong trong|doi ngay|huy dat/, 'Vào Đặt phòng trên trang chủ, chọn loại phòng, nhập ngày nhận và ngày trả cùng thông tin liên hệ. Lễ tân sẽ xác nhận tình trạng phòng. Nếu cần đổi ngày hoặc hủy yêu cầu đã gửi, liên hệ lễ tân kèm mã BK.', 'booking'],
-  [/lien he|le tan|khieu nai|khan cap|tro giup|mat do|wifi|wi fi|internet/, 'Bạn có thể gọi số máy nhánh 0 từ điện thoại trong phòng. Nếu đã có QR dịch vụ, bạn cũng có thể chọn Yêu cầu hỗ trợ tại phòng. Lễ tân cung cấp thông tin Wi-Fi hoặc tiếp nhận việc cần hỗ trợ.', 'housekeeping']
-];
+function findService(text, menu) {
+  const token = ` ${text} `;
+  const aliases = menu.flatMap(item => (serviceAliases[item.id] || []).map(alias => ({ item, alias })))
+    .sort((left, right) => right.alias.length - left.alias.length);
+  return aliases.find(({ alias }) => token.includes(` ${alias} `))?.item;
+}
 
 function readDates(text) {
   const today = hotelDay();
@@ -95,62 +122,131 @@ function readDates(text) {
   return [...new Set(dates)].slice(0, 2);
 }
 
-function answerHotelQuestion(question, menu, roomTypes, checkAvailability) {
-  const normalized = normalize(question);
-  if (!normalized) return { text: 'Bạn có thể hỏi về giá phòng, thực đơn, dọn phòng, nhận phòng hoặc thanh toán.' };
-  const chosen = roomTypes.find(room => normalized.includes(normalize(room.typeLabel).replace('phong ', '')));
-  const dates = readDates(question);
-  if (checkAvailability && dates.length === 2 && /\b(con phong|phong trong|dat phong|con .* khong|co phong|con .+ ngay)\b/.test(normalized)) {
-    const count = checkAvailability(dates[0], dates[1], chosen?.type);
-    if (count === null) return { text: 'Bạn hãy kiểm tra lại ngày nhận và ngày trả phòng. Ngày nhận phải từ hôm nay trở đi và trước ngày trả.', action: 'booking' };
-    const label = chosen ? chosen.typeLabel : 'phòng thuộc mọi loại';
-    return { text: `Lịch từ ${dates[0]} đến ${dates[1]} hiện còn ${count} ${label}. Bạn có thể gửi yêu cầu để lễ tân xác nhận.`, action: 'booking' };
-  }
-  if (/^(chao|hello|hi|xin chao)( ban)?$/.test(normalized)) return { text: 'Xin chào! Mình có thể giúp xem giá phòng, tìm món trong thực đơn hoặc hướng dẫn bạn nhận và trả phòng.' };
-  if (/\b(cam on|thanks)\b/.test(normalized) && normalized.split(' ').length <= 7) return { text: 'Rất vui được hỗ trợ bạn. Bạn cứ hỏi tiếp nếu cần thêm thông tin nhé.' };
-  if (/di ung|an chay|khong gluten/.test(normalized)) return { text: 'Bạn có thể ghi chú nhu cầu ăn uống trong yêu cầu dịch vụ. Nếu có dị ứng, hãy báo lễ tân qua máy nhánh 0 để bếp xác nhận nguyên liệu trước khi đặt.', action: 'dining' };
-  if (/gia phong|loai phong|gia .* dem|tien phong|phong .* bao nhieu/.test(normalized) ||
-      (chosen && /\b(gia|bao nhieu|may tien|dem)\b/.test(normalized))) {
-    const rates = (chosen ? [chosen] : roomTypes).map(room => `${room.typeLabel}: ${money(room.pricePerNight)}/đêm`);
-    const numberWords = { mot: 1, hai: 2, ba: 3, bon: 4, nam: 5, sau: 6, bay: 7 };
-    const count = normalized.match(/\b(\d{1,2}|mot|hai|ba|bon|nam|sau|bay) dem\b/)?.[1];
-    const nights = Number(numberWords[count] || count);
-    const estimate = chosen && nights > 0 ? `\nTạm tính ${nights} đêm: ${money(nights * chosen.pricePerNight)}. Chi phí dịch vụ tính riêng.` : '';
-    return { text: `${rates.join('\n')}${estimate}\nTình trạng phòng được lễ tân xác nhận theo ngày bạn chọn.`, action: 'booking' };
-  }
-  if (chosen && /\b(con|trong|dat|co khong)\b/.test(normalized)) return {
-    text: `Bạn muốn nhận và trả ${chosen.typeLabel} ngày nào? Ví dụ, nhập 2026-12-01 đến 2026-12-03 để mình kiểm tra lịch phòng.`, action: 'booking'
-  };
-  const topic = topics.find(([pattern]) => pattern.test(normalized));
-  if (topic) return { text: topic[1], action: topic[2] };
+function roomFacts(room) {
+  return `${room.typeLabel} · ${room.area} m² · tối đa ${room.maxGuests} khách\n${room.bed}. ${room.amenities.join(' · ')}. ${money(room.pricePerNight)}/đêm.`;
+}
 
-  const intentWords = [...words(normalized)].filter(word => !stopWords.has(word));
-  const matches = menu.map(item => {
-    const titleWords = words(item.name);
-    const meaningful = intentWords.filter(word => titleWords.has(word));
-    return { item, score: meaningful.length };
-  }).filter(row => row.score > 0).sort((a, b) => b.score - a.score);
-  if (matches.length) {
-    const highest = matches[0];
-    const selected = matches.filter(row => row.score === highest.score).slice(0, 4);
+function guideReply(topic, state) {
+  return { ...guides[topic], state: { topic, tourStep: state.tourStep } };
+}
+
+function explainRoom(room) {
+  return {
+    text: roomFacts(room), action: 'rooms', state: { topic: 'room', roomType: room.type, tourStep: 0 },
+    suggestions: ['Phòng đó còn trống không?', 'Vậy 2 đêm bao nhiêu?', 'Giới thiệu tiếp đi']
+  };
+}
+
+function overview(roomTypes) {
+  return { text: roomTypes.map(roomFacts).join('\n\n'), action: 'rooms', state: { topic: 'rooms', tourStep: 0 },
+    suggestions: ['Deluxe có gì?', 'Suite ở được mấy người?', 'Giới thiệu tiếp đi'] };
+}
+
+function answerQuestion(question, menu, roomTypes, checkAvailability, state) {
+  const text = normalize(question);
+  if (presence.test(text)) return { text: 'Mình đây! Bạn muốn mình giới thiệu các hạng phòng, dịch vụ tại phòng hay cách đặt phòng?', suggestions: genericSuggestions, state };
+  if (/^(cam on|thanks)( ban| nhe| nha| a)?$/.test(text)) return { text: 'Rất vui được hỗ trợ bạn. Bạn cứ hỏi tiếp nếu cần thêm thông tin nhé.', suggestions: genericSuggestions, state };
+  if (continuation.test(text)) {
+    const next = introSteps[(state.tourStep + 1) % introSteps.length];
+    const answer = next === 'rooms' ? overview(roomTypes) : guideReply(next, state);
+    answer.state.tourStep = introSteps.indexOf(next);
+    if (next !== 'payment') answer.suggestions = [...answer.suggestions.slice(0, 2).filter(q => q !== 'Giới thiệu tiếp đi'), 'Giới thiệu tiếp đi'];
+    return answer;
+  }
+  if (/^gioi thieu( ve)?( khach san| golden haven)?( di| nhe)?$|\b(so sanh|khac nhau|cac hang phong|cac loai phong|co nhung phong nao)\b/.test(text)) {
+    const requested = findRoomTypes(text, roomTypes);
+    return overview(requested.length > 1 ? requested : roomTypes);
+  }
+
+  const requested = findRoomTypes(text, roomTypes);
+  const refersBack = followUp.test(text) || /\b(phong do|loai do|mon do|dich vu do|co gi|may nguoi)\b/.test(text);
+  const dates = readDates(question);
+  const room = requested[0] || ((refersBack || dates.length) && roomTypes.find(profile => profile.type === state.roomType));
+  const namedItem = findService(text, menu);
+  const availability = !namedItem && ((isAvailable.test(text) && (room || /\bphong\b/.test(text))) || (dates.length > 0 && state.topic === 'availability'));
+  if (availability) {
+    const conversation = { topic: 'availability', roomType: room?.type, tourStep: 0 };
+    if (dates.length < 2) return {
+      text: `Bạn muốn nhận và trả ${room?.typeLabel.toLowerCase() || 'phòng'} ngày nào? Hãy nhập cả hai ngày, ví dụ 01/12/2026 đến 03/12/2026.`,
+      action: 'booking', state: conversation
+    };
+    const count = checkAvailability(dates[0], dates[1], room?.type);
+    const label = room?.typeLabel.toLowerCase() || 'phòng thuộc mọi hạng';
     return {
-      text: selected.map(({ item }) => {
-        const price = Math.round(item.price * (100 - (item.salePercent || 0)) / 100);
-        const availability = item.available === false ? ' · Tạm hết' : '';
-        return `${item.name} — ${money(price)}${availability}. ${item.desc || ''}`;
-      }).join('\n\n'),
-      action: highest.item.section === 'dining' ? 'dining' : 'housekeeping'
+      text: count === null ? 'Ngày nhận phải từ hôm nay trở đi và trước ngày trả. Bạn gửi lại hai ngày giúp mình nhé.'
+        : count ? `Từ ${dates[0].split('-').reverse().join('/')} đến ${dates[1].split('-').reverse().join('/')}, lịch hiện còn ${count} ${label}. Bạn có thể gửi yêu cầu để lễ tân xác nhận.`
+          : `Hạng bạn chọn hiện đã hết trong khoảng ngày này. Bạn có thể xem hạng khác hoặc đổi ngày.`,
+      action: count === 0 ? 'rooms' : 'booking', state: conversation
     };
   }
-  if (/an uong|thuc don|do an|do uong|am thuc|minibar/.test(normalized)) return {
-    text: 'Thực đơn có điểm tâm, món chính, trái cây, cà phê, trà và đồ uống minibar. Bạn có thể hỏi tên món cụ thể để xem giá.',
-    action: 'dining'
+  if (/\b(di ung|an chay|khong gluten)\b/.test(text)) return guideReply('allergy', state);
+  if (/\b(ma bk|ma dat|tra cuu|tinh trang dat|qr dat phong)\b/.test(text)) return guideReply('lookup', state);
+  if (/\b(hoa don|thanh toan|tra tien|tien mat|chuyen khoan|vietqr)\b/.test(text)) return guideReply('payment', state);
+  if (/\b(quet qr|ma qr|goi dich vu|qr trong phong|gui yeu cau|ma pin)\b/.test(text)) return guideReply('services', state);
+  if (/\b(tra phong|check out|checkout)\b/.test(text)) return guideReply('checkout', state);
+  if (/\b(nhan phong|check in|checkin)\b/.test(text)) return guideReply('arrival', state);
+  if (/\b(dat phong|doi ngay|huy dat)\b/.test(text)) return guideReply('booking', state);
+  if (/\b(lien he|le tan|khieu nai|khan cap|mat do|wifi|wi fi|internet)\b/.test(text)) return guideReply('contact', state);
+
+  const item = namedItem || (refersBack && state.topic === 'item' && menu.find(row => row.id === state.serviceId));
+  if (item) {
+    const price = Math.round(item.price * (100 - (item.salePercent || 0)) / 100);
+    return {
+      text: `${item.name} · ${money(price)}${item.available === false ? ' · hiện tạm hết' : ''}. ${item.desc || ''}`,
+      action: item.section === 'dining' ? 'dining' : 'housekeeping',
+      state: { topic: 'item', serviceId: item.id, tourStep: 1 },
+      suggestions: ['Dùng QR trong phòng thế nào?', 'Thanh toán ở đâu?']
+    };
+  }
+
+  const numberWords = { mot: 1, hai: 2, ba: 3, bon: 4, nam: 5, sau: 6, bay: 7 };
+  const count = (unit) => {
+    const value = text.match(new RegExp(`\\b(\\d{1,2}|mot|hai|ba|bon|nam|sau|bay) ${unit}\\b`))?.[1];
+    return Number(numberWords[value] || value);
   };
-  if (/buong phong|tien ich|ve sinh|do dung/.test(normalized)) return {
-    text: 'Buồng phòng hỗ trợ dọn phòng, bổ sung khăn hoặc nước, cho mượn đồ và giặt ủi. Bạn có thể hỏi tên dịch vụ để xem giá.',
-    action: 'housekeeping'
+  const nights = count('dem');
+  if (requested.length > 1) return overview(requested);
+  if (room && (nights > 0 || isPrice.test(text))) {
+    return {
+      text: `${room.typeLabel} giá ${money(room.pricePerNight)}/đêm.${nights > 0 ? ` Tạm tính ${nights} đêm: ${money(nights * room.pricePerNight)}. Dịch vụ gọi thêm tính riêng.` : ''}`,
+      action: 'booking', state: { topic: 'rates', roomType: room.type, tourStep: 0 },
+      suggestions: ['Vậy 2 đêm bao nhiêu?', 'Phòng đó có gì?', 'Phòng đó còn trống không?']
+    };
+  }
+  const guests = count('(?:nguoi|khach)');
+  if (!room && guests > 0) {
+    const fits = roomTypes.filter(profile => profile.maxGuests >= guests);
+    return fits.length ? { ...overview(fits), text: `Với ${guests} người, bạn có thể chọn:\n\n${fits.map(roomFacts).join('\n\n')}` }
+      : { text: 'Hạng Suite nhận tối đa 4 khách. Với nhóm đông hơn, bạn có thể chọn nhiều phòng và liên hệ lễ tân để sắp xếp phòng gần nhau.', action: 'rooms', state: { topic: 'rooms', tourStep: 0 } };
+  }
+  if (room) return explainRoom(room);
+  if (/\b(gia phong|hang phong|loai phong|tien phong)\b/.test(text)) return overview(roomTypes);
+  if (/\b(an uong|thuc don|do an|do uong|am thuc|minibar)\b/.test(text)) return guideReply('food', state);
+  if (/\b(buong phong|tien ich|ve sinh|do dung)\b/.test(text)) return guideReply('housekeeping', state);
+  return null;
+}
+
+async function chatWithHotel(question, history, menu, roomTypes, checkAvailability, conversation) {
+  const previous = Array.isArray(history) ? history.filter(q => typeof q === 'string').slice(-4).map(q => q.slice(0, 300)) : [];
+  const roomFromHistory = findRoomTypes(normalize(previous.at(-1) || ''), roomTypes)[0];
+  const state = {
+    topic: ['room', 'rooms', 'rates', 'availability', 'item'].includes(conversation?.topic) ? conversation.topic : '',
+    roomType: roomTypes.find(room => room.type === conversation?.roomType)?.type || roomFromHistory?.type,
+    serviceId: menu.find(item => item.id === conversation?.serviceId)?.id,
+    tourStep: Number.isInteger(conversation?.tourStep) && conversation.tourStep >= 0 && conversation.tourStep < introSteps.length ? conversation.tourStep : -1
   };
-  return { unknown: true, text: 'Mình chưa có thông tin về câu hỏi này. Bạn có thể hỏi về đặt phòng, giá món, dọn phòng hoặc thanh toán. Với các yêu cầu riêng, hãy hỏi lễ tân qua máy nhánh 0.' };
+  let mode = 'lookup';
+  let answer = answerQuestion(question, menu, roomTypes, checkAvailability, state);
+  if (!answer && hotelCue.test(normalize(question))) {
+    const intent = await classifyQuestion(question, previous);
+    if (intentQueries[intent]) {
+      answer = answerQuestion(`${question} ${intentQueries[intent]}`, menu, roomTypes, checkAvailability, state);
+      if (answer) mode = 'model';
+    }
+  }
+  answer ||= { text: 'Mình chưa hiểu ý bạn. Bạn muốn hỏi về phòng, đặt phòng hay một dịch vụ cụ thể? Hãy cho mình tên hạng phòng hoặc món để mình tra đúng giá.', suggestions: genericSuggestions, state };
+  return { text: answer.text, action: answer.action, suggestions: answer.suggestions || genericSuggestions,
+    conversation: answer.state, context: question, mode };
 }
 
 module.exports = { chatWithHotel };

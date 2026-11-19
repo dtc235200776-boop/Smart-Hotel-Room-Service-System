@@ -97,6 +97,8 @@ const roomLabels = {
   maintenance: 'Đang bảo trì'
 };
 const roomGrid = document.getElementById('roomStatusGrid');
+const roomFilters = document.querySelectorAll('[data-room-filter]');
+let selectedRoomFilter = 'all';
 const checkinBackdrop = document.getElementById('checkinBackdrop');
 const checkinForm = document.getElementById('checkinForm');
 
@@ -108,6 +110,8 @@ function openCheckin(number) {
   const tomorrow = new Date(Date.now() + 86400000);
   checkinForm.elements.plannedCheckout.min = tomorrow.toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
   checkinForm.elements.plannedCheckout.value = checkinForm.elements.plannedCheckout.min;
+  checkinForm.elements.guests.max = room?.profile?.maxGuests || 4;
+  checkinForm.elements.guests.value = '1';
   checkinBackdrop.hidden = false;
   checkinForm.elements.guestName.focus();
 }
@@ -181,16 +185,31 @@ async function loadRooms() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Không tải được sơ đồ phòng.');
     roomsList = data.rooms || [];
+    renderRoomGrid();
+    renderQRCodes();
+  } catch (error) {
+    roomGrid.textContent = error.message;
+  }
+}
 
-    roomGrid.innerHTML = roomsList.map(room => {
+function renderRoomGrid() {
+    roomFilters.forEach(button => {
+      const filter = button.dataset.roomFilter;
+      button.setAttribute('aria-pressed', String(filter === selectedRoomFilter));
+      const count = button.querySelector('span');
+      if (count) count.textContent = `· ${roomsList.filter(room => room.type === filter && room.status === 'available').length} trống`;
+    });
+    const visible = roomsList.filter(room => selectedRoomFilter === 'all' || selectedRoomFilter === room.type);
+    roomGrid.innerHTML = visible.map(room => {
       const state = roomLabels[room.status] || room.status;
+      const profile = room.profile;
       const pinDisplay = room.pin ? `<span style="display:inline-block; margin-left:6px; padding:1px 6px; background:#fef3c7; color:#92400e; border-radius:4px; font-size:11px; font-weight:700;">PIN: ${room.pin}</span>` : '';
       
       const detail = room.status === 'occupied'
         ? `${escapeHtml(room.guestName)}<br><small>Nhận thực tế: ${room.checkedInAt ? HotelFolio.time(room.checkedInAt) : HotelFolio.day(room.checkIn) + ' · chưa ghi giờ'}<br>Dự kiến trả: ${HotelFolio.day(room.plannedCheckout)}${room.receiptId ? '<br>Đã thu tiền · chờ trả phòng' : ''}</small>`
         : room.status === 'cleaning' && room.lastGuestName
         ? `Khách vừa trả: ${escapeHtml(room.lastGuestName)}<br><small>Trả thực tế: ${HotelFolio.time(room.lastCheckOut)}</small>`
-        : `${room.typeLabel || 'Phòng tiêu chuẩn'} · ${money(room.pricePerNight)}/đêm`;
+        : `${money(room.pricePerNight)}/đêm`;
 
       let actions = '';
       if (room.status === 'available') {
@@ -223,24 +242,36 @@ async function loadRooms() {
       }
 
       return `
-        <article class="room-status-card ${room.status}">
+        <article class="room-status-card ${room.status} room-type-${escapeHtml(room.type)}">
           <h3>
             Phòng ${room.number} ${pinDisplay}
             <span class="room-state">${state}</span>
           </h3>
+          <span class="room-class-label">${escapeHtml(room.typeLabel)}</span>
+          ${profile ? `<span class="room-card-capacity">${profile.area} m² · tối đa ${profile.maxGuests} khách</span>` : ''}
           <p>${detail}</p>
+          ${profile ? `<button type="button" class="room-profile-link" data-room-profile="${room.number}">Xem tiện nghi</button>` : ''}
           ${actions}
         </article>`;
-    }).join('');
-
-    renderQRCodes();
-  } catch (error) {
-    roomGrid.textContent = error.message;
-  }
+    }).join('') || '<p>Chưa có phòng thuộc hạng này.</p>';
 }
+
+roomFilters.forEach(button => button.addEventListener('click', () => {
+  selectedRoomFilter = button.dataset.roomFilter;
+  renderRoomGrid();
+}));
 
 // Xử lý sự kiện trên lưới phòng
 roomGrid.addEventListener('click', async event => {
+  const profileButton = event.target.closest('[data-room-profile]');
+  if (profileButton) {
+    const room = roomsList.find(row => row.number === Number(profileButton.dataset.roomProfile));
+    if (!room?.profile) return;
+    document.getElementById('frontdeskRoomProfileTitle').textContent = `Phòng ${room.number} · ${room.typeLabel}`;
+    document.getElementById('frontdeskRoomProfileBody').innerHTML = `${RoomProfile.photo(room.profile)}${RoomProfile.details(room.profile, { heading: false })}`;
+    document.getElementById('roomProfileDialog').showModal();
+    return;
+  }
   const receipt = event.target.closest('[data-receipt]');
   if (receipt) return openCheckoutFolio(null, receipt.dataset.receipt);
   const checkin = event.target.closest('[data-checkin]');

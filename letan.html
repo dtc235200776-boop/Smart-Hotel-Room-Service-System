@@ -325,6 +325,12 @@
 
     <section class="room-status-panel">
       <div class="room-status-heading"><div><h2>Tình trạng phòng &amp; thủ tục khách</h2><p>Tiếp tân nhận phòng, xác nhận thu tiền dịch vụ và hoàn tất trả phòng.</p></div></div>
+      <div class="room-type-filters" aria-label="Lọc sơ đồ theo hạng phòng">
+        <button type="button" data-room-filter="all" aria-pressed="true">Tất cả</button>
+        <button type="button" data-room-filter="standard" aria-pressed="false">Tiêu chuẩn <span></span></button>
+        <button type="button" data-room-filter="deluxe" aria-pressed="false">Deluxe <span></span></button>
+        <button type="button" data-room-filter="suite" aria-pressed="false">Suite <span></span></button>
+      </div>
       <div id="roomStatusGrid" class="room-status-grid">Đang tải sơ đồ phòng…</div>
     </section>
 
@@ -386,6 +392,7 @@
         <input type="hidden" name="roomNumber">
         <label>Họ tên khách<input name="guestName" maxlength="80" required></label>
         <label>Số điện thoại<input name="guestPhone" type="tel" maxlength="30" required></label>
+        <label>Số khách<input name="guests" type="number" min="1" max="4" value="1" required></label>
         <label>Ngày trả phòng dự kiến<input name="plannedCheckout" type="date" required></label>
         <div class="checkin-actions"><button type="button" id="cancelCheckin">Hủy</button><button type="submit">Xác nhận nhận phòng</button></div>
       </form>
@@ -439,11 +446,17 @@
     </section>
   </div>
 
+  <dialog id="roomProfileDialog" class="room-profile-dialog" aria-labelledby="frontdeskRoomProfileTitle">
+    <form method="dialog"><button class="receipt-button" type="submit">Đóng</button></form>
+    <h2 id="frontdeskRoomProfileTitle"></h2>
+    <div id="frontdeskRoomProfileBody"></div>
+  </dialog>
   <section id="receiptPrint" class="receipt-print"></section>
 
   <script src="assets/vendor/qrcode-generator.js"></script>
   <script src="qr.js"></script>
   <script src="folio-ui.js"></script>
+  <script src="room-profile.js"></script>
   <script src="payment-qr.js"></script>
   <script src="letan.js?v=folio"></script>
 </body>

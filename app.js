@@ -76,11 +76,21 @@ function connectGuestUpdates() {
     guestUpdates.close();
     currentStayToken = '';
     currentPin = '';
+    showGuestRoomProfile();
     sessionStorage.removeItem(`room_token_${currentTable.replace(/\D/g, '')}`);
     const area = document.getElementById('customerOrders');
     if (area) area.textContent = 'Phiên lưu trú đã kết thúc. Vui lòng liên hệ lễ tân nếu cần hỗ trợ.';
   });
   guestUpdates.onopen = renderCustomerStatus;
+}
+
+function showGuestRoomProfile(profile) {
+  const card = document.getElementById('guestRoomProfile');
+  if (!card) return;
+  card.hidden = !profile;
+  if (!profile) return;
+  document.getElementById('guestRoomProfileTitle').textContent = `Phòng của quý khách · ${profile.typeLabel} · ${profile.area} m²`;
+  document.getElementById('guestRoomProfileDetails').innerHTML = `${RoomProfile.photo(profile)}<div>${RoomProfile.details(profile, { heading: false })}</div>`;
 }
 function renderMenu() {
   const query = (document.getElementById('menuSearch')?.value || '').trim().toLocaleLowerCase('vi');
@@ -305,6 +315,7 @@ async function init() {
         const authData = await authRes.json();
         currentStayToken = authData.token || urlToken;
         sessionStorage.setItem(`room_token_${roomNum}`, currentStayToken);
+        showGuestRoomProfile(authData.profile);
       } else {
         document.getElementById('pinAuthModal')?.classList.add('active');
       }
@@ -323,6 +334,7 @@ async function init() {
       if (!res.ok) throw new Error(data.error || 'Mã PIN phòng không chính xác.');
       currentStayToken = data.token;
       currentPin = pinVal;
+      showGuestRoomProfile(data.profile);
       sessionStorage.setItem(`room_token_${roomNum}`, data.token);
       document.getElementById('pinAuthModal')?.classList.remove('active');
       connectGuestUpdates();

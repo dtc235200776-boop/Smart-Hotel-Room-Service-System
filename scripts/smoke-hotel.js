@@ -63,10 +63,18 @@ async function run() {
     const { receptionist, cashier, kitchen, housekeeping, manager } = loggedIn;
     const today = hotelDay();
     const tomorrow = hotelDay(new Date(Date.now() + 86400000));
-    const booking = (index, roomType) => request('/api/reservations', {
+    const booking = (index, roomType, guests = 2) => request('/api/reservations', {
       method: 'POST', body: { guestName: `Demo ${index}`, phone: `090000000${index}`,
-        email: `demo${index}@example.invalid`, roomType, checkIn: today, checkOut: tomorrow, guests: 2 }
+        email: `demo${index}@example.invalid`, roomType, checkIn: today, checkOut: tomorrow, guests }
     });
+    const catalog = (await expected('/api/room-types')).types;
+    assert.deepEqual(catalog.map(room => [room.type, room.area, room.maxGuests]), [
+      ['standard', 22, 2], ['deluxe', 32, 3], ['suite', 48, 4]
+    ]);
+    assert.equal(new Set(catalog.map(room => room.image)).size, 3);
+    assert.equal((await booking(6, 'standard', 3)).status, 400);
+    assert.equal((await booking(7, 'deluxe', 4)).status, 400);
+    assert.equal((await booking(8, 'suite', 4)).status, 201);
     const deluxe = await Promise.all(Array.from({ length: 5 }, (_, index) => booking(index, 'deluxe')));
     const accepted = deluxe.filter(result => result.status === 201);
     assert.equal(accepted.length, 4);
@@ -84,6 +92,9 @@ async function run() {
     assert.equal(alternate.status, 200);
     const guests = [winner, alternate.data.room];
     assert.ok(guests.every(room => room.checkedInAt && room.stayToken));
+    const guestRoom = await expected(`/api/room-auth?room=${guests[0].number}&token=${guests[0].stayToken}`);
+    assert.equal(guestRoom.profile.type, 'deluxe');
+    assert.equal(guestRoom.profile.maxGuests, 3);
 
     const sendOrder = (room, id) => request('/api/orders', {
       method: 'POST', body: { table: `Phòng ${room.number}`, token: room.stayToken, items: [{ id, qty: 1 }] }
@@ -136,12 +147,28 @@ async function run() {
     const history = await expected('/api/folios', { cookie: manager });
     assert.equal(history.receipts.length, 2);
     assert.equal(history.active.length, 0);
-    const chat = await expected('/api/assistant', { method: 'POST', body: {
-      question: 'Vậy 2 đêm bao nhiêu?', history: ['Phòng Deluxe giá bao nhiêu?']
-    } });
-    assert.match(chat.text, /1\.500\.000/);
+    const ask = (question, conversation) => expected('/api/assistant', { method: 'POST', body: { question, conversation } });
+    const greeting = await ask('trợ lý có ở đây ko');
+    assert.match(greeting.text, /Mình đây/);
+    assert.doesNotMatch(greeting.text, /Rượu vang/);
+    const intro = await ask('giới thiệu tiếp đi', greeting.conversation);
+    assert.match(intro.text, /Tiêu chuẩn/i);
+    assert.match(intro.text, /Suite/);
+    const services = await ask('giới thiệu tiếp đi', intro.conversation);
+    assert.match(services.text, /quét QR dịch vụ/i);
+    const detail = await ask('Deluxe có gì?');
+    assert.match(detail.text, /32 m²/);
+    assert.match((await ask('Vậy 2 đêm bao nhiêu?', detail.conversation)).text, /1\.500\.000/);
+    const availability = await ask('Phòng đó còn trống không?', detail.conversation);
+    assert.match(availability.text, /ngày nào/);
+    assert.match((await ask(`${today} đến ${tomorrow}`, availability.conversation)).text, /Deluxe/i);
+    const dishes = await ask('Còn phở bò không?', detail.conversation);
+    assert.match(dishes.text, /Phở bò/);
+    assert.doesNotMatch(dishes.text, /phòng trống/);
+    const unknown = await ask('kích thước sao hỏa');
+    assert.match(unknown.text, /chưa hiểu/);
     assert.deepEqual((await expected('/api/payment-info')).bank, null);
-    console.log('PASS: room class and reservations, concurrent check-in and stock, role access, separate orders, payment, receipts, checkout, and chat context.');
+    console.log('PASS: distinct room profiles and occupancy caps, concurrent reservations and stock, role access, receipts, checkout, and chat follow-ups.');
   } finally {
     if (server && server.exitCode === null) {
       const exited = once(server, 'exit');

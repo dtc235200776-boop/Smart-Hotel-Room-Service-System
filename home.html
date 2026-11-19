@@ -17,6 +17,7 @@
     <a class="home-brand" href="/" aria-label="GOLDEN HAVEN - Trang chủ"><span>G</span><span><b>GOLDEN HAVEN</b><small>HOTEL &amp; RESORT</small></span></a>
     <nav aria-label="Điều hướng chính">
       <a class="current" href="/">Trang chủ</a>
+      <a href="#roomTypes">Hạng phòng</a>
       <a href="#experience">Trải nghiệm</a>
       <a href="khach-hang.html#foodSection">Buồng phòng</a>
       <a href="khach-hang.html#drinkSection">Ẩm thực</a>
@@ -43,6 +44,11 @@
       <div class="hero-seal"><span>GC</span><small>STAY<br>WELL</small></div>
     </section>
 
+    <section class="room-showcase" id="roomTypes" aria-labelledby="roomTypesTitle">
+      <h2 id="roomTypesTitle">Chọn hạng phòng</h2>
+      <div class="room-showcase-grid" id="roomTypesGrid"><p>Đang tải các hạng phòng…</p></div>
+    </section>
+
     <section class="booking-shell" id="booking">
       <div class="booking-heading"><span class="eyebrow-wood">LÊN KẾ HOẠCH LƯU TRÚ</span><h2>Tìm kỳ nghỉ phù hợp</h2></div>
       <form id="bookingForm" class="booking-form">
@@ -55,6 +61,7 @@
         <label><span>Số khách</span><select id="guests" name="guests"><option value="1">1 khách</option><option value="2" selected>2 khách</option><option value="3">3 khách</option><option value="4">4 khách</option></select></label>
         <button class="button-wood booking-submit" type="submit">Gửi yêu cầu <span>→</span></button>
       </form>
+      <p id="bookingRoomSummary" class="booking-room-summary" hidden></p>
       <p id="bookingAvailability" class="booking-note" role="status"></p>
       <p class="booking-note">Yêu cầu được gửi tới tiếp tân để xác nhận. Gửi yêu cầu chưa đồng nghĩa với đặt phòng đã được xác nhận.</p>
       <div id="bookingResult" class="booking-result" role="status" aria-live="polite" hidden></div>
@@ -76,6 +83,7 @@
   </footer>
   <script src="assets/vendor/qrcode-generator.js"></script>
   <script src="qr.js"></script>
+  <script src="room-profile.js"></script>
   <script src="home.js?v=booking-qr"></script>
   <script src="hotel-chat.js"></script>
 </body>

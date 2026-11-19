@@ -18,7 +18,61 @@ checkOut.min = localDate(1);
 checkIn.value = localDate(0);
 checkOut.value = localDate(1);
 const availabilityNote = document.getElementById('bookingAvailability');
+const roomTypeSelect = form.elements.roomType;
+const guestSelect = form.elements.guests;
+const roomTypesGrid = document.getElementById('roomTypesGrid');
+const bookingRoomSummary = document.getElementById('bookingRoomSummary');
+let roomProfiles = [];
 let availabilityRequest;
+
+function setBookingRoom() {
+  const profile = roomProfiles.find(room => room.type === roomTypeSelect.value);
+  if (!profile) return;
+  const guests = Math.min(Number(guestSelect.value) || 2, profile.maxGuests);
+  guestSelect.replaceChildren(...Array.from({ length: profile.maxGuests }, (_, index) => new Option(`${index + 1} khách`, String(index + 1))));
+  guestSelect.value = String(guests);
+  bookingRoomSummary.hidden = false;
+  bookingRoomSummary.textContent = `${profile.typeLabel} · ${profile.area} m² · tối đa ${profile.maxGuests} khách · ${RoomProfile.rate(profile.pricePerNight)}/đêm`;
+  roomTypesGrid.querySelectorAll('[data-book-room]').forEach(button => {
+    const current = button.dataset.bookRoom === profile.type;
+    button.closest('article').classList.toggle('selected-room-type', current);
+  });
+}
+
+async function loadRoomProfiles() {
+  try {
+    const response = await fetch('/api/room-types');
+    if (!response.ok) throw new Error('Room catalog unavailable');
+    roomProfiles = (await response.json()).types;
+    roomTypesGrid.innerHTML = roomProfiles.map(profile => `
+      <article class="room-showcase-card room-type-${RoomProfile.safe(profile.type)}">
+        ${RoomProfile.photo(profile)}
+        <div class="room-showcase-info">
+          ${RoomProfile.details(profile)}
+          <div class="room-showcase-actions">
+            <span><strong>${RoomProfile.rate(profile.pricePerNight)}</strong> / đêm</span>
+            <button class="button-wood" type="button" data-book-room="${RoomProfile.safe(profile.type)}">Chọn ${RoomProfile.safe(profile.typeLabel)}</button>
+          </div>
+        </div>
+      </article>`).join('');
+    const requestedType = new URLSearchParams(location.search).get('roomType');
+    if (roomProfiles.some(room => room.type === requestedType)) roomTypeSelect.value = requestedType;
+    setBookingRoom();
+    updateAvailability();
+  } catch (_) {
+    roomTypesGrid.textContent = 'Chưa tải được thông tin hạng phòng. Bạn vẫn có thể chọn loại phòng ở biểu mẫu bên dưới.';
+  }
+}
+roomTypesGrid.addEventListener('click', event => {
+  const button = event.target.closest('[data-book-room]');
+  if (!button) return;
+  roomTypeSelect.value = button.dataset.bookRoom;
+  setBookingRoom();
+  updateAvailability();
+  document.getElementById('booking').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  form.elements.guestName.focus({ preventScroll: true });
+});
+loadRoomProfiles();
 async function updateAvailability() {
   availabilityRequest?.abort();
   if (!checkIn.validity.valid || !checkOut.validity.valid || checkOut.value <= checkIn.value) {
@@ -46,7 +100,10 @@ checkIn.addEventListener('change', () => {
   updateAvailability();
 });
 checkOut.addEventListener('change', updateAvailability);
-form.elements.roomType.addEventListener('change', updateAvailability);
+roomTypeSelect.addEventListener('change', () => {
+  setBookingRoom();
+  updateAvailability();
+});
 updateAvailability();
 form.addEventListener('submit', async event => {
   event.preventDefault();
@@ -62,6 +119,7 @@ form.addEventListener('submit', async event => {
     if (!response.ok) throw new Error(data.error || 'Chưa gửi được yêu cầu. Vui lòng thử lại.');
     await showBookingResult(data.reservation, true);
     form.reset(); checkIn.value = localDate(0); checkOut.value = localDate(1); form.querySelector('[name="guests"]').value = '2';
+    setBookingRoom();
   } catch (error) {
     resultBox.textContent = error.message;
   } finally {

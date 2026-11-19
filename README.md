@@ -36,6 +36,28 @@ Các tài khoản demo dùng cố định đúng như bảng trên để biến 
 
 ## Chạy một lượt từ đặt phòng đến trả phòng
 
+```mermaid
+flowchart TD
+    A["Khách chọn hạng phòng, ngày và số khách"] --> B{"Còn phòng đúng hạng và đủ chỗ?"}
+    B -- "Hết hoặc vượt sức chứa" --> A
+    B -- "Còn" --> C["Khách gửi yêu cầu, nhận mã BK và QR đặt phòng"]
+    C --> D["Lễ tân xác nhận, gán phòng thực tế khi khách đến"]
+    D --> E["Khách nhận phòng và QR dịch vụ"]
+    E --> F{"Khách gửi yêu cầu dịch vụ?"}
+    F -- "Có" --> G["Đơn gắn với phòng và lượt lưu trú"]
+    G -- "Món và đồ uống" --> H["Bếp tiếp nhận, phục vụ và cập nhật"]
+    G -- "Dọn dẹp và tiện ích" --> I["Buồng phòng tiếp nhận, phục vụ và cập nhật"]
+    H --> J["Thu ngân đối chiếu phiếu khi các phần việc đã hoàn tất"]
+    I --> J
+    F -- "Không" --> J
+    J --> K["Thu tiền, giao hóa đơn hoặc PDF"]
+    K --> L["Lễ tân trả phòng"]
+    L --> M["Buồng phòng dọn, xác nhận phòng trống"]
+    N["Quản lý theo dõi sơ đồ, đơn chờ, tồn kho và doanh thu"] -.-> D
+    J -.-> N
+    M -.-> N
+```
+
 1. **Khách** chọn ngày và loại phòng ở trang chủ, xem số phòng còn theo lịch rồi gửi yêu cầu. Lưu mã `BK-...` hoặc tải **QR đặt phòng** để xem trạng thái và đưa cho lễ tân khi đến. Yêu cầu mới ở trạng thái chờ xác nhận.
 2. **Lễ tân** xét yêu cầu và xác nhận. Khi khách đến, tra cứu đúng mã `BK-...` và chọn phòng trống đúng hạng. Có thể nhập mã nếu camera trong trình duyệt không hỗ trợ quét. Sau khi check-in, đưa khách QR dịch vụ phòng và PIN dự phòng.
 3. **Khách lưu trú** dùng camera điện thoại quét **QR dịch vụ phòng**, chọn món hoặc tiện ích, rồi gửi yêu cầu. Khách có thể xem trạng thái phục vụ trên trang dịch vụ.
@@ -46,6 +68,7 @@ Các tài khoản demo dùng cố định đúng như bảng trên để biến 
 Khi chạy trên máy tính, kết nối điện thoại cùng Wi-Fi và mở địa chỉ IP LAN hiển thị cạnh QR, với cổng của máy chủ (mặc định 3000). Nếu đổi mạng hoặc đổi cổng, tạo lại mã. Có thể mở lại booking bằng mã `BK-...` để tải QR mới. Khi sử dụng web đã triển khai, mở trang chủ và lễ tân từ địa chỉ HTTPS của website để mã trỏ về cùng tên miền.
 
 Ảnh minh họa món ăn và dịch vụ có ghi [nguồn ảnh](assets/menu/SOURCES.md).
+Các hạng Tiêu chuẩn, Deluxe và Suite trong bản demo lần lượt có 22, 32, 48 m² và tối đa 2, 3, 4 khách. [Nguồn ảnh hạng phòng](assets/rooms/SOURCES.md).
 
 ## Trợ lý GOLDEN HAVEN và chế độ demo
 
