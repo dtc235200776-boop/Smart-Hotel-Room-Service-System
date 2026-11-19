@@ -33,20 +33,7 @@ form.addEventListener('submit', async event => {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Chưa gửi được yêu cầu. Vui lòng thử lại.');
-    const reservation = data.reservation;
-    const qrPayload = `${location.origin}/home.html?booking=${encodeURIComponent(reservation.id)}`;
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&format=png&data=${encodeURIComponent(qrPayload)}`;
-    resultBox.innerHTML = `<div class="booking-success"><div><strong>Đã nhận yêu cầu ${escapeBookingText(reservation.id)}</strong><p>Tiếp tân sẽ xác nhận qua số ${escapeBookingText(reservation.phone)}. Trạng thái: <b>Đang chờ xác nhận</b>. Yêu cầu chưa phải đặt phòng đã được xác nhận.</p><p>${escapeBookingText(reservation.roomTypeLabel)} · ${escapeBookingText(reservation.checkIn)} – ${escapeBookingText(reservation.checkOut)}</p></div><div class="booking-qr"><img src="${qrUrl}" alt="Mã QR tra cứu booking ${escapeBookingText(reservation.id)}"><a class="button-wood" href="${qrUrl}" download="${escapeBookingText(reservation.id)}.png">Tải mã QR</a></div></div>`;
-    resultBox.querySelector('.booking-qr a').addEventListener('click', async event => {
-      event.preventDefault();
-      try {
-        const qrResponse = await fetch(qrUrl);
-        if (!qrResponse.ok) throw new Error('QR download unavailable');
-        const blobUrl = URL.createObjectURL(await qrResponse.blob());
-        const download = document.createElement('a'); download.href = blobUrl; download.download = `${reservation.id}.png`; download.click();
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
-      } catch (_) { window.open(qrUrl, '_blank', 'noopener'); }
-    });
+    await showBookingResult(data.reservation, true);
     form.reset(); checkIn.value = localDate(0); checkOut.value = localDate(1); form.querySelector('[name="guests"]').value = '2';
   } catch (error) {
     resultBox.textContent = error.message;
@@ -61,8 +48,61 @@ if (bookingId) {
   resultBox.textContent = `Đang tra cứu đặt phòng ${bookingId}…`;
   fetch(`/api/reservations/${encodeURIComponent(bookingId)}`)
     .then(async response => { const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Không tìm thấy đặt phòng.'); return data.reservation; })
-    .then(reservation => { resultBox.textContent = `Booking ${reservation.id} · ${reservation.statusLabel} · ${reservation.roomTypeLabel} · ${reservation.checkIn} – ${reservation.checkOut}.`; document.getElementById('booking')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); })
+    .then(async reservation => {
+      await showBookingResult(reservation);
+      resultBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    })
     .catch(error => { resultBox.textContent = error.message; });
+}
+
+async function showBookingResult(reservation, wasSubmitted = false) {
+  const id = escapeBookingText(reservation.id);
+  const status = escapeBookingText(reservation.statusLabel || 'Đang chờ xác nhận');
+  const confirmation = wasSubmitted
+    ? `<p>Lễ tân sẽ liên hệ qua số ${escapeBookingText(reservation.phone)} để xác nhận.</p>`
+    : '';
+  resultBox.innerHTML = `<div class="booking-success">
+    <div>
+      <strong>${wasSubmitted ? 'Đã nhận yêu cầu' : 'Mã đặt phòng'} ${id}</strong>
+      <p>Trạng thái: <b>${status}</b></p>
+      <p>${escapeBookingText(reservation.roomTypeLabel || reservation.roomType)} · ${escapeBookingText(reservation.checkIn)} – ${escapeBookingText(reservation.checkOut)}</p>
+      ${confirmation}
+      <p>Dùng mã này để xem trạng thái đặt phòng hoặc đưa lễ tân khi nhận phòng. QR để gọi dịch vụ sẽ được cấp sau khi nhận phòng.</p>
+      <p id="bookingQrNetworkNote"></p>
+      ${wasSubmitted ? '<p><a id="bookingStatusLink" hidden>Mở link tra cứu</a></p>' : ''}
+    </div>
+    <div class="booking-qr" hidden>
+      <img alt="QR đặt phòng ${id}" width="192" height="192">
+      <a class="button-wood" download="${id}.png">Tải QR đặt phòng</a>
+    </div>
+  </div>`;
+
+  const { url } = await getHotelQrAddress('/home.html');
+  url.searchParams.set('booking', reservation.id);
+  const note = resultBox.querySelector('#bookingQrNetworkNote');
+  if (isLocalQrHost(url.hostname)) {
+    note.textContent = 'Chưa tìm thấy địa chỉ mở được từ điện thoại. Hãy mở lại trang bằng IP LAN hoặc địa chỉ website rồi lấy lại QR.';
+  } else if (url.protocol === 'http:') {
+    note.textContent = `Để quét bằng điện thoại, hãy kết nối cùng Wi-Fi với máy chủ và thử mở ${url.origin}.`;
+  }
+
+  const link = resultBox.querySelector('#bookingStatusLink');
+  if (link) {
+    link.href = url;
+    link.hidden = false;
+  }
+
+  const qr = resultBox.querySelector('.booking-qr');
+  try {
+    const imageUrl = createHotelQrImage(url.href);
+    qr.querySelector('img').src = imageUrl;
+    qr.querySelector('a').href = imageUrl;
+    qr.hidden = false;
+  } catch (_) {
+    const message = document.createElement('p');
+    message.textContent = 'Chưa tạo được hình QR. Bạn vẫn có thể cung cấp mã đặt phòng ở trên cho lễ tân.';
+    note.after(message);
+  }
 }
 
 function escapeBookingText(value = '') {

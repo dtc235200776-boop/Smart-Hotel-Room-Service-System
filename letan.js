@@ -3,7 +3,6 @@
 // File: letan.js
 // ==========================================================================
 
-const DEFAULT_LAN_IP = location.hostname;
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const money = value => `${Number(value || 0).toLocaleString('vi-VN')}đ`;
 
@@ -406,9 +405,11 @@ document.getElementById('vietqrBackdrop')?.addEventListener('click', event => {
 // ==========================================================================
 // 4. Sinh mã QR dịch vụ phòng kèm Token & PIN
 // ==========================================================================
+let suggestedRoomQrUrl = `${location.origin}/khach-hang.html`;
+let roomQrBaseUrl = suggestedRoomQrUrl;
+
 function getRoomServiceUrl(roomNumber, token = '') {
-  const base = document.getElementById('baseUrl').value.trim() || `${location.origin}/khach-hang.html`;
-  const url = new URL(base, location.origin);
+  const url = new URL(roomQrBaseUrl);
   url.search = '';
   url.searchParams.set('room', roomNumber);
   if (token) url.searchParams.set('token', token);
@@ -426,8 +427,9 @@ function showRoomQr(roomNumber) {
   const descElem = document.getElementById('guestQrPinDesc');
   if (descElem) descElem.innerHTML = pinNote;
 
-  document.getElementById('guestQrImage').src = `https://quickchart.io/qr?text=${encodeURIComponent(url)}&size=220&margin=1`;
+  document.getElementById('guestQrImage').src = createHotelQrImage(url);
   document.getElementById('guestQrOpenLink').href = url;
+  document.getElementById('guestQrNetworkNote').textContent = qrNetworkNote(new URL(url));
   document.getElementById('guestQrBackdrop').hidden = false;
   document.getElementById('closeGuestQr').focus();
 }
@@ -443,14 +445,20 @@ document.getElementById('guestQrBackdrop')?.addEventListener('click', event => {
 });
 
 function renderQRCodes() {
-  let baseUrl = document.getElementById('baseUrl').value.trim();
-  if (!baseUrl) return;
-  if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
-    baseUrl = 'http://' + baseUrl;
-    document.getElementById('baseUrl').value = baseUrl;
+  const input = document.getElementById('baseUrl');
+  let base;
+  try {
+    const value = input.value.trim() || suggestedRoomQrUrl;
+    base = new URL(/^https?:\/\//i.test(value) ? value : `http://${value}`);
+    if (base.pathname === '/') base.pathname = '/khach-hang.html';
+  } catch (_) {
+    showQrAddressMessage('Địa chỉ chưa hợp lệ. Hãy nhập IP LAN và cổng hoặc địa chỉ HTTPS của website.', 'danger');
+    return;
   }
-  localStorage.setItem('hotel_qr_base_url', baseUrl);
-  checkHostWarning(baseUrl);
+
+  roomQrBaseUrl = base.href;
+  input.value = roomQrBaseUrl;
+  showQrAddressMessage(qrNetworkNote(base) || `Mã QR sẽ mở trang dịch vụ tại ${base.origin}.`, isLocalQrHost(base.hostname) ? 'danger' : 'success');
 
   const container = document.getElementById('tablesContainer');
   if (!container) return;
@@ -463,8 +471,7 @@ function renderQRCodes() {
     const pin = room?.pin || '';
     const orderUrl = getRoomServiceUrl(roomNum, token);
     const safeOrderUrl = escapeHtml(orderUrl);
-    const targetUrl = encodeURIComponent(orderUrl);
-    const qrApi = `https://quickchart.io/qr?text=${targetUrl}&size=180&margin=1`;
+    const qrImage = createHotelQrImage(orderUrl);
 
     const card = document.createElement('div');
     card.className = 'table-qr-card';
@@ -473,33 +480,30 @@ function renderQRCodes() {
       <div class="table-title">PHÒNG ${roomNum}</div>
       ${pin ? `<div style="background:#fef3c7; color:#92400e; font-weight:800; font-size:12px; padding:3px 8px; border-radius:6px; margin-bottom:8px;">PIN: ${pin}</div>` : ''}
       <a href="${safeOrderUrl}" target="_blank" rel="noopener">
-        <img class="qr-img" src="${qrApi}" alt="Mã QR dịch vụ Phòng ${roomNum}" loading="lazy">
+        <img class="qr-img" src="${qrImage}" alt="Mã QR dịch vụ Phòng ${roomNum}" loading="lazy">
       </a>
       <div class="instruction">Quét mã bằng camera để gọi dịch vụ phòng</div>
       <a class="qr-demo-link" href="${safeOrderUrl}" target="_blank" rel="noopener">Mở thử Phòng ${roomNum} →</a>
-      <div class="qr-dest-url">${orderUrl}</div>
+      <div class="qr-dest-url">${safeOrderUrl}</div>
     `;
     container.appendChild(card);
   }
 }
 
-function checkHostWarning(urlStr) {
+function qrNetworkNote(url) {
+  if (isLocalQrHost(url.hostname)) {
+    return 'Điện thoại không mở được localhost. Chọn IP LAN của máy chủ, hoặc dùng địa chỉ HTTPS nếu web đã được triển khai.';
+  }
+  if (url.protocol === 'http:') return `Kết nối điện thoại cùng Wi-Fi với máy chủ và thử mở ${url.origin} trước khi quét.`;
+  return '';
+}
+
+function showQrAddressMessage(message, type) {
   const alertBox = document.getElementById('ipAlertBox');
   if (!alertBox) return;
-  try {
-    const u = new URL(urlStr);
-    if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
-      alertBox.className = 'alert-banner danger';
-      alertBox.style.display = 'block';
-      alertBox.innerHTML = `⚠️ <b>CHÚ Ý:</b> Địa chỉ <code>${u.hostname}</code> chỉ mở trên máy chủ, điện thoại khách sẽ không truy cập được. Hãy dùng địa chỉ LAN được máy chủ phát hiện hoặc tên miền HTTPS của khách sạn.`;
-    } else {
-      alertBox.className = 'alert-banner success';
-      alertBox.style.display = 'block';
-      alertBox.innerHTML = `✓ <b>Tuyệt vời:</b> Địa chỉ máy chủ hợp lệ (<code>${u.hostname}</code>). Điện thoại quét mã sẽ mở đúng phòng ngay!`;
-    }
-  } catch (_) {
-    alertBox.style.display = 'none';
-  }
+  alertBox.className = `alert-banner ${type}`;
+  alertBox.style.display = 'block';
+  alertBox.textContent = message;
 }
 
 function applyCustomUrl() {
@@ -507,31 +511,16 @@ function applyCustomUrl() {
 }
 window.applyCustomUrl = applyCustomUrl;
 
-function selectIp(ip) {
+function useRoomQrAddress(address) {
   const input = document.getElementById('baseUrl');
-  try {
-    const appPort = location.port || '80';
-    const u = new URL(input.value || `${location.protocol}//${ip}${location.port ? `:${appPort}` : ''}/khach-hang.html`);
-    u.hostname = ip;
-    input.value = u.href;
-  } catch (_) {
-    const port = location.port || '80';
-    input.value = `http://${ip}:${port}/khach-hang.html`;
-  }
+  input.value = address;
   renderQRCodes();
 }
-window.selectIp = selectIp;
 
 function switchPort(port) {
-  const input = document.getElementById('baseUrl');
-  try {
-    const u = new URL(input.value || `http://${DEFAULT_LAN_IP}:${port}/khach-hang.html`);
-    u.port = port;
-    input.value = u.href;
-  } catch (_) {
-    input.value = `http://${DEFAULT_LAN_IP}:${port}/khach-hang.html`;
-  }
-  renderQRCodes();
+  const url = new URL(roomQrBaseUrl);
+  url.port = port;
+  useRoomQrAddress(url.href);
 }
 window.switchPort = switchPort;
 
@@ -779,6 +768,22 @@ document.getElementById('frontdeskLogout')?.addEventListener('click', async () =
 // 6. Khởi tạo toàn bộ trang
 // ==========================================================================
 window.addEventListener('DOMContentLoaded', async () => {
+  const { url, addresses } = await getHotelQrAddress('/khach-hang.html');
+  suggestedRoomQrUrl = url.href;
+  useRoomQrAddress(suggestedRoomQrUrl);
+  document.getElementById('btnLanIp').addEventListener('click', () => useRoomQrAddress(suggestedRoomQrUrl));
+  const detected = document.getElementById('detectedIps');
+  for (const address of addresses) {
+    const alternative = new URL(url);
+    alternative.hostname = address;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'quick-ip-chip';
+    button.textContent = address;
+    button.addEventListener('click', () => useRoomQrAddress(alternative.href));
+    detected.appendChild(button);
+  }
+
   await loadReceptionOrders();
   await loadRooms();
   await loadReservations();
@@ -788,25 +793,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     await loadRooms();
   }, 12000);
 
-  const input = document.getElementById('baseUrl');
-  let initialUrl = '';
-
-  try {
-    const res = await fetch('/api/network', { cache: 'no-store' });
-    if (res.ok) {
-      const network = await res.json();
-      if (network.url) initialUrl = network.url;
-    }
-  } catch (_) {}
-
-  if (!initialUrl && input) {
-    initialUrl = `${location.protocol}//${DEFAULT_LAN_IP}${location.port ? `:${location.port}` : ''}/khach-hang.html`;
-  }
-
   const room = new URLSearchParams(location.search).get('room');
-  if (room && input) initialUrl = `${initialUrl.split('?')[0]}?room=${encodeURIComponent(room)}`;
-  if (input) input.value = initialUrl;
-  renderQRCodes();
   if (room) showRoomQr(room);
 });
 

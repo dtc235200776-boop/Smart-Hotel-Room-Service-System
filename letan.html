@@ -356,13 +356,13 @@
 
       <div class="quick-ips">
         <span><b>Gợi ý IP LAN máy tính:</b></span>
-        <button class="quick-ip-chip" id="btnLanIp" onclick="selectIp(DEFAULT_LAN_IP)">📌 Dùng địa chỉ máy chủ hiện tại</button>
+        <button class="quick-ip-chip" id="btnLanIp" type="button">Dùng địa chỉ hệ thống gợi ý</button>
         <span id="detectedIps"></span>
       </div>
 
       <div class="port-selector">
         <span><b>Đổi cổng nhanh:</b></span>
-        <button class="quick-ip-chip" onclick="switchPort(location.port || '80')">Cổng ứng dụng hiện tại</button>
+        <button class="quick-ip-chip" onclick="switchPort(location.port)">Cổng ứng dụng hiện tại</button>
       </div>
 
       <div class="guide-box">
@@ -395,6 +395,7 @@
       <h2 id="guestQrTitle">Mã QR dịch vụ phòng</h2><p>Đưa mã này cho khách quét để gọi dịch vụ tại phòng.</p>
       <div id="guestQrPinDesc"></div>
       <img id="guestQrImage" alt="Mã QR dịch vụ phòng">
+      <p id="guestQrNetworkNote"></p>
       <div class="guest-qr-actions"><a id="guestQrOpenLink" href="#" target="_blank" rel="noopener">Mở thử trang khách</a><button id="closeGuestQr" type="button">Xong · quay lại sơ đồ phòng</button></div>
     </section>
   </div>
@@ -439,6 +440,8 @@
 
   <section id="receiptPrint" class="receipt-print"></section>
 
-  <script src="letan.js?v=20261105"></script>
+  <script src="assets/vendor/qrcode-generator.js"></script>
+  <script src="qr.js"></script>
+  <script src="letan.js?v=room-qr"></script>
 </body>
 </html>

@@ -47,6 +47,23 @@ const menuIllustrations = Object.fromEntries(Array.from({ length: 22 }, (_, inde
   return [id, `<svg class="menu-illustration" viewBox="0 0 100 100" aria-hidden="true" focusable="false"><use href="assets/menu-illustrations.svg#menu-${id}"></use></svg>`];
 }));
 const menuIcon = item => menuIllustrations[item.id] || item.icon || '✨';
+const menuPhotoFiles = [
+  'bed-linens', 'towels-toiletries', 'iron-board', 'hair-dryer', 'wash-dry',
+  'dry-clean', 'scooter', 'airport-car', 'breakfast', 'beef-pho', 'steak',
+  'spaghetti', 'sandwich', 'fruit', 'phin-coffee', 'jasmine-tea', 'red-wine',
+  'soft-drink', 'beer', 'mineral-water', 'room-water', 'room-assistance'
+];
+
+function renderMenuPhoto(item) {
+  const file = menuPhotoFiles[Number(item.id) - 1];
+  const fallback = `<span class="menu-photo-fallback" aria-hidden="true">${menuIcon(item)}</span>`;
+  if (!file) return fallback;
+  return `${fallback}<img class="menu-photo" src="assets/menu/${file}.jpg" alt="" width="720" height="432" loading="lazy" decoding="async">`;
+}
+
+document.addEventListener('error', event => {
+  if (event.target.matches?.('img.menu-photo')) event.target.remove();
+}, true);
 
 async function getOrders() {
   try {
@@ -67,7 +84,7 @@ function renderMenu() {
   const card = item => `
     <article class="food-card ${item.available === false ? 'sold-out' : ''}">
       <div class="food-img-wrap">
-        <span aria-hidden="true">${menuIcon(item)}</span>
+        ${renderMenuPhoto(item)}
         ${item.salePercent ? `<span class="sale-badge">-${item.salePercent}%</span>` : ''}
         ${item.price === 0 ? '<span class="sale-badge" style="background:#15803d">Free</span>' : ''}
         ${item.available === false ? '<span class="sold-out-badge">Tạm hết</span>' : ''}

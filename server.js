@@ -184,14 +184,19 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, { ok: true, app: 'Cloud Hotel & Resort Room Service', version: BUILD_VERSION, port: PORT, time: new Date().toISOString() });
     if (req.method === 'GET' && url.pathname === '/api/network') {
-      const allAddresses = Object.values(os.networkInterfaces()).flat().filter(item => item && item.family === 'IPv4' && !item.internal).map(item => item.address);
-      const lanAddresses = allAddresses.filter(ip => !ip.startsWith('169.254.'));
+      const interfaces = Object.entries(os.networkInterfaces());
+      const virtualAdapter = /virtual|vmware|vbox|vethernet|hyper-v|wsl|docker|loopback|vpn|tailscale|zerotier|tunnel/i;
+      const lanAddresses = [...new Set(interfaces
+        .sort(([first], [second]) => Number(virtualAdapter.test(first)) - Number(virtualAdapter.test(second)))
+        .flatMap(([, entries]) => entries || [])
+        .filter(item => item.family === 'IPv4' && !item.internal && !item.address.startsWith('169.254.'))
+        .map(item => item.address))];
       const hostHeader = req.headers.host || 'localhost';
       const parsedHost = new URL(`http://${hostHeader}`);
       const host = parsedHost.hostname;
-      const address = host && !['localhost', '127.0.0.1', '0.0.0.0'].includes(host) ? host : (lanAddresses[0] || 'localhost');
+      const localHost = ['localhost', '127.0.0.1', '0.0.0.0', '[::1]'].includes(host);
+      const address = localHost ? (lanAddresses[0] || 'localhost') : host;
       const protocol = String(req.headers['x-forwarded-proto'] || (req.socket.encrypted ? 'https' : 'http')).split(',')[0].trim();
-      const localHost = ['localhost', '127.0.0.1', '0.0.0.0'].includes(host);
       const publicAddress = !localHost && parsedHost.port !== String(LEGACY_PORT) ? hostHeader : `${address}:${PORT}`;
       return sendJson(res, 200, { address, addresses: lanAddresses, url: `${protocol}://${publicAddress}/khach-hang.html` });
     }
@@ -492,8 +497,10 @@ const server = http.createServer(async (req, res) => {
       const reservation = readStore().reservations.find(row => row.id === decodeURIComponent(reservationRoute[1]));
       if (!reservation) return sendJson(res, 404, { error: 'Không tìm thấy mã đặt phòng.' });
       const labels = { pending: 'Đang chờ lễ tân xác nhận', confirmed: 'Đã được lễ tân xác nhận', checked_in: 'Đã nhận phòng', completed: 'Đã hoàn tất lưu trú', rejected: 'Yêu cầu bị từ chối', cancelled: 'Yêu cầu đã hủy' };
-      if (canAccess(getRole(req), ['receptionist'])) return sendJson(res, 200, { reservation: { ...reservation, status: String(reservation.status).toUpperCase() } });
-      return sendJson(res, 200, { reservation: { id: reservation.id, status: reservation.status, statusLabel: labels[String(reservation.status).toLowerCase()] || String(reservation.status), roomType: reservation.roomType, roomTypeLabel: reservation.roomTypeLabel, checkIn: reservation.checkIn, checkOut: reservation.checkOut } });
+      const status = String(reservation.status).toLowerCase();
+      const statusLabel = labels[status] || reservation.status;
+      if (canAccess(getRole(req), ['receptionist'])) return sendJson(res, 200, { reservation: { ...reservation, status: status.toUpperCase(), statusLabel } });
+      return sendJson(res, 200, { reservation: { id: reservation.id, status: reservation.status, statusLabel, roomType: reservation.roomType, roomTypeLabel: reservation.roomTypeLabel, checkIn: reservation.checkIn, checkOut: reservation.checkOut } });
     }
     if (req.method === 'POST' && reservationCheckinRoute) {
       if (!canAccess(getRole(req), ['receptionist'])) return sendJson(res, getRole(req) ? 403 : 401, { error: 'Chỉ lễ tân hoặc quản lý được làm thủ tục Check-in.' });
@@ -549,7 +556,7 @@ const server = http.createServer(async (req, res) => {
     if (fs.statSync(file).isDirectory()) resolvedRequest = path.join(staticRequest, 'index.html');
     const resolvedFile = path.join(ROOT, resolvedRequest);
     if (!resolvedFile.startsWith(ROOT + path.sep) || !fs.existsSync(resolvedFile) || !fs.statSync(resolvedFile).isFile()) return sendJson(res, 404, { error: 'Không tìm thấy trang.' });
-    const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json' };
+    const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.jpg': 'image/jpeg', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json' };
     res.writeHead(200, { 'Content-Type': types[path.extname(resolvedFile)] || 'application/octet-stream', 'Cache-Control': path.extname(resolvedFile) === '.html' ? 'no-cache' : 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'strict-origin-when-cross-origin' }); fs.createReadStream(resolvedFile).pipe(res);
   } catch (error) { if (!res.headersSent) sendJson(res, 500, { error: 'Lỗi máy chủ.', detail: error.message }); else res.end(); }
 });

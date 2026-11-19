@@ -34,6 +34,15 @@ Sau khi nhận phòng, lễ tân xem QR trong cửa sổ riêng. Bấm **Xong ·
 
 Các tài khoản demo dùng cố định đúng như bảng trên để biến môi trường cũ không làm sai mật khẩu. Đây là tài khoản mẫu cho đồ án trình diễn.
 
-## In QR cho khách
+## Chạy một lượt từ đặt phòng đến trả phòng
 
-Mở ứng dụng bằng địa chỉ Node, đăng nhập Tiếp tân, làm thủ tục nhận phòng rồi hệ thống tự cuộn tới và làm nổi bật mã QR đúng phòng để đưa khách quét. Với khách đã nhận phòng, nút **Hiện QR cho khách** mở lại mã đó; **Mở dịch vụ khách** kiểm tra trực tiếp liên kết có `?room=...`. Máy chủ và điện thoại cần cùng Wi‑Fi; điện thoại phải truy cập được địa chỉ LAN hiển thị trong QR. QR cũ trỏ tới IP/cổng Live Server trước đây cần được in lại. Mở thư mục `qrcodes` sẽ tự chuyển về trang lễ tân, không còn dùng danh sách tệp làm trang chính.
+1. **Khách** gửi yêu cầu đặt phòng ở trang chủ. Lưu mã `BK-...` hoặc tải **QR đặt phòng** để xem trạng thái và đưa cho lễ tân khi đến. Yêu cầu mới ở trạng thái chờ xác nhận.
+2. **Lễ tân** vào cổng nội bộ, xem yêu cầu, tra cứu mã `BK-...` và chọn phòng trống phù hợp. Có thể nhập mã nếu camera trong trình duyệt không hỗ trợ quét. Sau khi check-in, bấm **Hiện QR** để đưa khách mã dịch vụ phòng và PIN dự phòng.
+3. **Khách lưu trú** dùng camera điện thoại quét **QR dịch vụ phòng**, chọn món hoặc tiện ích, rồi gửi yêu cầu. Khách có thể xem trạng thái phục vụ trên trang dịch vụ.
+4. **Bếp** nhận món và đồ uống. **Buồng phòng** nhận dọn dẹp và tiện ích. Nhân viên nhận việc và cập nhật khi hoàn thành.
+5. **Thu ngân** quyết toán dịch vụ đã hoàn thành. **Lễ tân** xem hóa đơn tổng hợp, xác nhận khoản đã thu và trả phòng. Buồng phòng xác nhận đã dọn để phòng về trạng thái trống.
+6. **Quản lý** xem doanh thu, tình trạng phòng, tồn kho và mở các màn hình của bộ phận trong cổng nội bộ.
+
+Khi chạy trên máy tính, kết nối điện thoại cùng Wi-Fi và mở địa chỉ IP LAN hiển thị cạnh QR, với cổng của máy chủ (mặc định 3000). Nếu đổi mạng hoặc đổi cổng, tạo lại mã. Có thể mở lại booking bằng mã `BK-...` để tải QR mới. Khi sử dụng web đã triển khai, mở trang chủ và lễ tân từ địa chỉ HTTPS của website để mã trỏ về cùng tên miền.
+
+Ảnh minh họa món ăn và dịch vụ có ghi [nguồn ảnh](assets/menu/SOURCES.md).
