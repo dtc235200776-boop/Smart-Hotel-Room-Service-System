@@ -564,11 +564,30 @@ server.on('listening', () => {
 });
 
 function listenOnAvailablePort() {
-  server.once('error', function retryOrStop(error) {
-    if (error.code === 'EADDRINUSE' && !process.env.PORT && PORT < 3010) {
-      PORT += 1;
-      console.warn(`Cổng đang được dùng; thử cổng ${PORT}...`);
-      listenOnAvailablePort();
+  server.once('error', error => {
+    if (error.code === 'EADDRINUSE' && !process.env.PORT) {
+      const probe = http.get({ hostname: '127.0.0.1', port: PORT, path: '/api/health', timeout: 1200 }, response => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', chunk => { body += chunk; });
+        response.on('end', () => {
+          try {
+            const health = JSON.parse(body);
+            if (health.ok && String(health.app || '').includes('Cloud Hotel')) {
+              console.log(`Máy chủ khách sạn đã chạy tại http://localhost:${PORT}; dùng cửa sổ đó, không mở thêm cổng.`);
+              process.exitCode = 0;
+              return;
+            }
+          } catch (_) { }
+          console.error(`Cổng ${PORT} đang được ứng dụng khác sử dụng. Đóng ứng dụng đó hoặc đặt PORT khác rồi chạy lại.`);
+          process.exitCode = 1;
+        });
+      });
+      probe.on('timeout', () => probe.destroy(new Error('timeout')));
+      probe.on('error', probeError => {
+        console.error(`Không thể mở cổng ${PORT}: ${probeError.message}. Hãy kiểm tra tiến trình đang giữ cổng rồi chạy lại.`);
+        process.exitCode = 1;
+      });
       return;
     }
     console.error(`Không thể mở máy chủ tại cổng ${PORT}: ${error.message}`);

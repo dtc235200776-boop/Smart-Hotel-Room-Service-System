@@ -2,7 +2,7 @@
 
 ## Chạy từ VS Code
 
-**Không dùng nút Go Live / Live Server** để vận hành. Go Live chỉ phục vụ tệp HTML ở cổng 5500, không chạy API đăng nhập, phòng, đặt món hay dữ liệu dùng chung. Mở dự án này trong VS Code, chạy `start-pos.bat` ở Explorer hoặc chọn **Terminal → Run Task → Khách sạn: Chạy ứng dụng**. Ứng dụng tự chọn cổng 3000–3010 nếu cổng trước đang bận và mở trang chủ. Có thể chạy `npm start` trong terminal; mở đúng địa chỉ được in trong cửa sổ máy chủ.
+**Không dùng nút Go Live / Live Server** để vận hành. Go Live chỉ phục vụ tệp HTML ở cổng 5500, không chạy API đăng nhập, phòng, đặt món hay dữ liệu dùng chung. Mở terminal trong thư mục dự án `Smart-Hotel-Room-Service-System`, chạy `npm start`, rồi dùng `http://localhost:3000`. Nếu cổng 3000 đang có máy chủ khách sạn, lệnh báo máy chủ đó đã chạy và không mở thêm cổng 3001. Nếu cổng bị ứng dụng khác chiếm, hãy đóng ứng dụng đó trước khi chạy lại.
 
 Nếu đang mở trang bằng cổng 5500, trang sẽ tự tìm máy chủ Node đang chạy rồi chuyển sang đúng địa chỉ. Nếu máy chủ chưa bật, trang sẽ hiện hướng dẫn khởi chạy.
 
