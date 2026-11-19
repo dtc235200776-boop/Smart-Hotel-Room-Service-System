@@ -30,35 +30,58 @@ async function run() {
     }
     const port = await freePort();
     const base = `http://127.0.0.1:${port}`;
-    server = spawn(process.execPath, ['server.js'], {
-      cwd: workspace, env: { ...process.env, PORT: String(port), RENDER: 'true', HOTEL_AI_ENDPOINT: '' },
-      windowsHide: true, stdio: ['ignore', 'ignore', 'inherit']
-    });
+    const renderUrl = 'https://golden-haven-smoke.example.invalid';
+    const passwords = Object.fromEntries(Object.keys(roles).map(role => [role, `smoke-test-only-${role}`]));
+    const passwordKeys = Object.keys(roles).map(role => `HOTEL_STAFF_${role.toUpperCase()}_PASSWORD`);
     async function request(url, { method = 'GET', cookie = '', body } = {}) {
       const response = await fetch(base + url, {
         method, headers: { 'Content-Type': 'application/json', cookie },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal: AbortSignal.timeout(5000)
       });
-      return { status: response.status, data: await response.json(), cookie: response.headers.get('set-cookie')?.split(';')[0] };
+      return { status: response.status, data: response.status === 204 ? null : await response.json(), setCookie: response.headers.get('set-cookie') };
     }
     async function expected(url, options, status = 200) {
       const response = await request(url, options);
       assert.equal(response.status, status, `${options?.method || 'GET'} ${url} · ${JSON.stringify(response.data)}`);
       return response.data;
     }
-    let ready = false;
-    for (let attempt = 0; attempt < 30; attempt++) {
-      ready = await request('/api/health').then(result => result.data.service === 'hotel-room-service').catch(() => false);
-      if (ready) break;
-      await wait(100);
+    async function startRender(passwordValues) {
+      const passwordEnv = Object.fromEntries(passwordKeys.map((key, index) => [key, passwordValues[index] || '']));
+      server = spawn(process.execPath, ['server.js'], {
+        cwd: workspace,
+        env: { ...process.env, ...passwordEnv, PORT: String(port), RENDER: 'true', RENDER_EXTERNAL_URL: renderUrl,
+          NODE_ENV: 'production', HOTEL_AI_ENDPOINT: '', HOTEL_BANK_ID: '' },
+        windowsHide: true, stdio: ['ignore', 'ignore', 'inherit']
+      });
+      for (let attempt = 0; attempt < 30; attempt++) {
+        const health = await request('/api/health').catch(() => null);
+        if (health?.data.service === 'hotel-room-service') return;
+        await wait(100);
+      }
+      assert.fail('Server did not start');
     }
-    assert.ok(ready, 'Server did not start');
+
+    const signIn = (role, password) => ({ method: 'POST', body: { role, username: roles[role], password } });
+    await startRender([]);
+    await expected('/api/login', signIn('manager', '123456'), 503);
+    const stopped = once(server, 'exit');
+    server.kill();
+    await stopped;
+
+    await startRender(Object.values(passwords));
+    assert.deepEqual(await expected('/api/network'), {
+      address: 'golden-haven-smoke.example.invalid', addresses: [], url: `${renderUrl}/khach-hang.html`
+    });
+    await expected('/api/login', signIn('manager', '123456'), 401);
+    await expected('/api/login', signIn('manager', passwords.cashier), 401);
     const loggedIn = {};
-    for (const [role, username] of Object.entries(roles)) {
-      const login = await request('/api/login', { method: 'POST', body: { role, username, password: '123456' } });
+    for (const [role, password] of Object.entries(passwords)) {
+      const login = await request('/api/login', signIn(role, password));
       assert.equal(login.status, 200);
-      loggedIn[role] = login.cookie;
+      assert.match(login.setCookie, /; Secure\b/);
+      assert.match(login.setCookie, /; HttpOnly\b/);
+      loggedIn[role] = login.setCookie.split(';')[0];
     }
     const { receptionist, cashier, kitchen, housekeeping, manager } = loggedIn;
     const today = hotelDay();
@@ -168,7 +191,11 @@ async function run() {
     const unknown = await ask('kích thước sao hỏa');
     assert.match(unknown.text, /chưa hiểu/);
     assert.deepEqual((await expected('/api/payment-info')).bank, null);
-    console.log('PASS: distinct room profiles and occupancy caps, concurrent reservations and stock, role access, receipts, checkout, and chat follow-ups.');
+    const logout = await request('/api/logout', { method: 'POST', cookie: manager });
+    assert.equal(logout.status, 204);
+    assert.match(logout.setCookie, /Max-Age=0; Secure\b/);
+    assert.equal((await expected('/api/session', { cookie: manager })).staff, false);
+    console.log('PASS: Render login configuration and HTTPS QR, room profiles and capacity, concurrent reservations and stock, role access, receipts, checkout, and chat follow-ups.');
   } finally {
     if (server && server.exitCode === null) {
       const exited = once(server, 'exit');

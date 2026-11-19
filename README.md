@@ -22,7 +22,7 @@ Tiếp tân và thu ngân là hai công việc/tài khoản riêng, cùng dùng 
 
 Sau khi nhận phòng, lễ tân xem QR trong cửa sổ riêng. Bấm **Xong · quay lại sơ đồ phòng** để làm thủ tục khách kế tiếp. Trang QR dành cho khách không có nút đăng nhập nhân viên; dùng `bo-phan.html` để vào khu vực nội bộ.
 
-## Tài khoản demo
+## Tài khoản demo trên máy cá nhân
 
 | Bộ phận | Tài khoản | Mật khẩu |
 | --- | --- | --- |
@@ -32,7 +32,7 @@ Sau khi nhận phòng, lễ tân xem QR trong cửa sổ riêng. Bấm **Xong ·
 | Bếp | `bep` | `123456` |
 | Quản lý | `quanly` | `123456` |
 
-Các tài khoản demo dùng cố định đúng như bảng trên để biến môi trường cũ không làm sai mật khẩu. Đây là tài khoản mẫu cho đồ án trình diễn.
+Mật khẩu trong bảng là mặc định khi chạy trên máy cá nhân. Trên Render, mật khẩu của từng tài khoản được cấu hình theo phần triển khai bên dưới.
 
 ## Chạy một lượt từ đặt phòng đến trả phòng
 
@@ -77,3 +77,23 @@ Các hạng Tiêu chuẩn, Deluxe và Suite trong bản demo lần lượt có 2
 - Để nối một dịch vụ mô hình trên môi trường khác, đặt `HOTEL_AI_ENDPOINT` thành URL chat completions và `HOTEL_AI_MODEL` thành tên mô hình của dịch vụ. `HOTEL_AI_KEY` là khóa nếu dịch vụ yêu cầu. Khi endpoint chưa có hoặc bận, trang vẫn tra cứu theo dữ liệu khách sạn.
 - VietQR ở quầy chỉ hiện khi khai báo `HOTEL_BANK_ID`, `HOTEL_BANK_ACCOUNT` và `HOTEL_BANK_NAME` theo tài khoản đã xác minh. Nhân viên xác nhận sau khi thực nhận tiền.
 - `npm test` chạy máy chủ thử với dữ liệu riêng để kiểm tra đặt trùng phòng, tồn kho, phân quyền, quyết toán và trả phòng. Khi mở cho khách thật, cần cấu hình tài khoản riêng và kho lưu trữ bền vững cho dữ liệu khách, đơn và hóa đơn.
+
+## Triển khai bản demo lên Render
+
+1. Đưa phiên bản đã kiểm tra bằng `npm ci` và `npm test` lên nhánh `main` của GitHub. Kho mã nguồn chỉ chứa dữ liệu khởi tạo mẫu. Dữ liệu lưu trú trên máy và mật khẩu triển khai được lưu riêng.
+2. Với dịch vụ mới, vào [Render Dashboard](https://dashboard.render.com/) và chọn **New → Blueprint**, kết nối kho GitHub rồi chọn `render.yaml`. Blueprint khai báo Web Service **Free**, Node.js `24.22.1`, lệnh build `npm ci`, lệnh chạy `npm start` và kiểm tra sức khỏe tại `/api/health`. Nếu dịch vụ đã tồn tại, đối chiếu các mục tương ứng trong **Settings** của dịch vụ đó. [Tài liệu Blueprint](https://render.com/docs/blueprint-spec)
+3. Điền một mật khẩu mới cho mỗi bộ phận, mỗi mật khẩu ít nhất 12 ký tự và dùng riêng cho bộ phận đó. Nhập giá trị khi tạo Blueprint hoặc trong **Environment** của dịch vụ đã có, sau đó triển khai lại. [Tài liệu biến môi trường](https://render.com/docs/configure-environment-variables)
+
+   | Bộ phận | Tài khoản | Biến chứa mật khẩu |
+   | --- | --- | --- |
+   | Lễ tân | `letan` | `HOTEL_STAFF_RECEPTIONIST_PASSWORD` |
+   | Thu ngân | `thungan` | `HOTEL_STAFF_CASHIER_PASSWORD` |
+   | Bếp | `bep` | `HOTEL_STAFF_KITCHEN_PASSWORD` |
+   | Buồng phòng | `buongphong` | `HOTEL_STAFF_HOUSEKEEPING_PASSWORD` |
+   | Quản lý | `quanly` | `HOTEL_STAFF_MANAGER_PASSWORD` |
+
+4. Khi Render báo **Live**, mở URL HTTPS của dịch vụ. Mở `/api/health` để kiểm tra `ok: true`, vào `/bo-phan.html` để kiểm tra đăng nhập, rồi tạo booking mẫu và quét cả QR đặt phòng lẫn QR dịch vụ bằng điện thoại. Thử hoàn tất yêu cầu ở Bếp và Buồng phòng, ghi nhận thanh toán mẫu ở Thu ngân, in hóa đơn, trả phòng ở Lễ tân và đối chiếu doanh thu ở Quản lý.
+
+Để viết báo cáo, chụp màn hình cấu hình dịch vụ, log triển khai thành công, trang chủ, QR đặt phòng, check-in, giao việc, hóa đơn và bảng doanh thu. Giữ thông tin đăng nhập ngoài ảnh chụp. Bản demo dùng dữ liệu giả, trợ lý tra cứu dữ liệu khách sạn khi chưa khai báo dịch vụ mô hình và quầy có thể ghi nhận tiền mặt mẫu.
+
+Render Free đưa dịch vụ vào chế độ ngủ sau 15 phút vắng lưu lượng. `data.json` trên Render có thể mất khi dịch vụ ngủ, khởi động lại hoặc triển khai lại. Với bản demo, tạo dữ liệu mẫu ngay trong buổi trình bày. Chuyển dữ liệu sang cơ sở dữ liệu bền vững trước khi dùng cho khách thật. [Giới hạn Render Free](https://render.com/docs/free)
