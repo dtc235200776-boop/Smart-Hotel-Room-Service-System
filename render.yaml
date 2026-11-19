@@ -3,8 +3,20 @@ services:
     name: smart-hotel-room-service
     runtime: node
     plan: free
-    buildCommand: ""
+    branch: main
+    buildCommand: npm ci
     startCommand: npm start
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
-        value: 18.20.0
+        value: "24.22.1"
+      - key: HOTEL_STAFF_RECEPTIONIST_PASSWORD
+        sync: false
+      - key: HOTEL_STAFF_CASHIER_PASSWORD
+        sync: false
+      - key: HOTEL_STAFF_KITCHEN_PASSWORD
+        sync: false
+      - key: HOTEL_STAFF_HOUSEKEEPING_PASSWORD
+        sync: false
+      - key: HOTEL_STAFF_MANAGER_PASSWORD
+        sync: false

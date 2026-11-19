@@ -10,13 +10,23 @@ const ROOT = __dirname;
 const BUILD_VERSION = '2026-11-19-golden-haven-1';
 const DATA_FILE = path.join(ROOT, 'data.json');
 let PORT = Number(process.env.PORT || 3000);
+const ON_RENDER = process.env.RENDER === 'true';
+const PUBLIC_DEPLOYMENT = ON_RENDER || process.env.NODE_ENV === 'production';
+const DEMO_PASSWORD = '123456';
 const STAFF_ACCOUNTS = {
-  receptionist: { username: 'letan', password: '123456', role: 'receptionist' },
-  cashier: { username: 'thungan', password: '123456', role: 'cashier' },
-  housekeeping: { username: 'buongphong', password: '123456', role: 'housekeeping' },
-  kitchen: { username: 'bep', password: '123456', role: 'kitchen' },
-  manager: { username: 'quanly', password: '123456', role: 'manager' }
+  receptionist: { username: 'letan', passwordKey: 'HOTEL_STAFF_RECEPTIONIST_PASSWORD' },
+  cashier: { username: 'thungan', passwordKey: 'HOTEL_STAFF_CASHIER_PASSWORD' },
+  housekeeping: { username: 'buongphong', passwordKey: 'HOTEL_STAFF_HOUSEKEEPING_PASSWORD' },
+  kitchen: { username: 'bep', passwordKey: 'HOTEL_STAFF_KITCHEN_PASSWORD' },
+  manager: { username: 'quanly', passwordKey: 'HOTEL_STAFF_MANAGER_PASSWORD' }
 };
+const hashPassword = password => crypto.createHash('sha256').update(password).digest();
+const staffPasswords = new Map(Object.entries(STAFF_ACCOUNTS).map(([role, account]) => [
+  role, process.env[account.passwordKey]?.trim() || (PUBLIC_DEPLOYMENT ? '' : DEMO_PASSWORD)
+]));
+const publicLoginConfigured = [...staffPasswords.values()].every(password => password.length >= 12)
+  && new Set(staffPasswords.values()).size === staffPasswords.size;
+const staffPasswordHashes = new Map([...staffPasswords].map(([role, password]) => [role, hashPassword(password)]));
 const LEGACY_PORT = Number(process.env.LEGACY_PORT || 5500);
 const seedInventory = [
   { id: 'towels', name: 'Khăn tắm', category: 'Buồng phòng', quantity: 38, minimum: 12, unit: 'chiếc' },
@@ -31,6 +41,7 @@ const seedInventory = [
   { id: 'beer', name: 'Bia', category: 'Minibar', quantity: 22, minimum: 8, unit: 'lon' }
 ];
 const SESSION_COOKIE = 'hotel_pos_staff';
+const sessionCookie = (token, maxAge) => `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${PUBLIC_DEPLOYMENT ? '; Secure' : ''}`;
 const sessions = new Map();
 const streams = new Set();
 const pinFailures = new Map();
@@ -284,6 +295,10 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && url.pathname === '/api/health') return sendJson(res, 200, { ok: true, service: 'hotel-room-service', app: 'GOLDEN HAVEN', version: BUILD_VERSION, port: PORT, time: new Date().toISOString() });
     if (req.method === 'GET' && url.pathname === '/api/network') {
+      if (ON_RENDER && process.env.RENDER_EXTERNAL_URL) {
+        const serviceUrl = new URL('/khach-hang.html', process.env.RENDER_EXTERNAL_URL);
+        return sendJson(res, 200, { address: serviceUrl.hostname, addresses: [], url: serviceUrl.href });
+      }
       const interfaces = Object.entries(os.networkInterfaces());
       const virtualAdapter = /virtual|vmware|vbox|vethernet|hyper-v|wsl|docker|loopback|vpn|tailscale|zerotier|tunnel/i;
       const lanAddresses = [...new Set(interfaces
@@ -302,13 +317,25 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/session') { const role = getRole(req); return sendJson(res, 200, { staff: Boolean(role), role }); }
     if (req.method === 'POST' && url.pathname === '/api/login') {
+      if (PUBLIC_DEPLOYMENT && !publicLoginConfigured) return sendJson(res, 503, { error: 'Đăng nhập nội bộ đang chờ cấu hình mật khẩu trên máy chủ.' });
       const body = await readBody(req);
-      const account = STAFF_ACCOUNTS[String(body.role || '')];
-      if (!account || String(body.username || '').trim() !== account.username || String(body.password || '').trim() !== account.password) return sendJson(res, 401, { error: 'Tài khoản, mật khẩu hoặc bộ phận không chính xác.' });
-      const token = crypto.randomBytes(32).toString('hex'); sessions.set(token, { expires: Date.now() + 12 * 60 * 60 * 1000, role: account.role });
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Set-Cookie': `${SESSION_COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200`, 'Cache-Control': 'no-store' }); return res.end(JSON.stringify({ ok: true, role: account.role }));
+      const role = String(body.role || '');
+      const account = STAFF_ACCOUNTS[role];
+      const passwordHash = staffPasswordHashes.get(role);
+      if (!passwordHash || String(body.username || '').trim() !== account.username ||
+          !crypto.timingSafeEqual(hashPassword(String(body.password || '').trim()), passwordHash)) {
+        return sendJson(res, 401, { error: 'Tài khoản, mật khẩu hoặc bộ phận không chính xác.' });
+      }
+      const token = crypto.randomBytes(32).toString('hex');
+      sessions.set(token, { expires: Date.now() + 12 * 60 * 60 * 1000, role });
+      res.setHeader('Set-Cookie', sessionCookie(token, 43200));
+      return sendJson(res, 200, { ok: true, role });
     }
-    if (req.method === 'POST' && url.pathname === '/api/logout') { const token = getCookie(req, SESSION_COOKIE); sessions.delete(token); res.writeHead(204, { 'Set-Cookie': `${SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0` }); return res.end(); }
+    if (req.method === 'POST' && url.pathname === '/api/logout') {
+      sessions.delete(getCookie(req, SESSION_COOKIE));
+      res.writeHead(204, { 'Set-Cookie': sessionCookie('', 0), 'Cache-Control': 'no-store' });
+      return res.end();
+    }
     if (req.method === 'GET' && url.pathname === '/api/menu') return sendJson(res, 200, { items: publicMenu(readStore()) });
     if (req.method === 'GET' && url.pathname === '/api/room-types') return sendJson(res, 200, { types: Object.values(ROOM_CONFIGS) });
     if (req.method === 'GET' && url.pathname === '/api/payment-info') {
@@ -713,7 +740,10 @@ const server = http.createServer(async (req, res) => {
 
 server.on('listening', () => {
   console.log(`GOLDEN HAVEN running at http://localhost:${PORT}`);
-  if (LEGACY_PORT !== PORT && !process.env.RENDER) {
+  if (PUBLIC_DEPLOYMENT && !publicLoginConfigured) {
+    console.warn('Đăng nhập nội bộ cần 5 mật khẩu khác nhau (ít nhất 12 ký tự) trong HOTEL_STAFF_*_PASSWORD.');
+  }
+  if (LEGACY_PORT !== PORT && !PUBLIC_DEPLOYMENT) {
     const legacyServer = http.createServer(server.listeners('request')[0]);
     legacyServer.on('error', error => console.warn(`Cổng QR cũ ${LEGACY_PORT} không khả dụng: ${error.message}`));
     legacyServer.listen(LEGACY_PORT, '0.0.0.0', () => console.log(`QR compatibility endpoint running at http://localhost:${LEGACY_PORT}`));
